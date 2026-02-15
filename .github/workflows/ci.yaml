@@ -78,19 +78,19 @@ jobs:
 
       - name: Start infrastructure services
         run: |
-          cat > .env << 'EOF'
+          cat > .env <<'EOF'
           GITHUB_MODELS_PAT=ghp_placeholder_not_used_for_infra_tests
-          LITELLM_MASTER_KEY=${{ env.LITELLM_MASTER_KEY }}
-          POSTGRES_DB=${{ env.POSTGRES_DB }}
-          POSTGRES_USER=${{ env.POSTGRES_USER }}
-          POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
-          DATABASE_URL=${{ env.DATABASE_URL }}
-          REDIS_HOST=${{ env.REDIS_HOST }}
-          REDIS_PORT=${{ env.REDIS_PORT }}
-          PRESIDIO_ANALYZER_URL=${{ env.PRESIDIO_ANALYZER_URL }}
-          PRESIDIO_ANALYZER_API_BASE=${{ env.PRESIDIO_ANALYZER_API_BASE }}
-          PRESIDIO_ANONYMIZER_API_BASE=${{ env.PRESIDIO_ANONYMIZER_API_BASE }}
           EOF
+          echo "LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}" >> .env
+          echo "POSTGRES_DB=${POSTGRES_DB}" >> .env
+          echo "POSTGRES_USER=${POSTGRES_USER}" >> .env
+          echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> .env
+          echo "DATABASE_URL=${DATABASE_URL}" >> .env
+          echo "REDIS_HOST=${REDIS_HOST}" >> .env
+          echo "REDIS_PORT=${REDIS_PORT}" >> .env
+          echo "PRESIDIO_ANALYZER_URL=${PRESIDIO_ANALYZER_URL}" >> .env
+          echo "PRESIDIO_ANALYZER_API_BASE=${PRESIDIO_ANALYZER_API_BASE}" >> .env
+          echo "PRESIDIO_ANONYMIZER_API_BASE=${PRESIDIO_ANONYMIZER_API_BASE}" >> .env
           docker compose up -d
 
       - name: Wait for gateway to become healthy
@@ -109,7 +109,7 @@ jobs:
 
       - name: Run health tests
         run: |
-          pip install -q httpx pytest
+          pip install -q httpx pytest pytest-timeout
           cd tests && pytest test_health.py -v
 
       - name: Run auth tests
@@ -150,29 +150,29 @@ jobs:
       - name: Check for GitHub Models PAT
         id: check-pat
         run: |
-          if [ -z "${{ secrets.GITHUB_MODELS_PAT }}" ]; then
+          if [ -z "${{ secrets.GH_MODELS_PAT }}" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::GITHUB_MODELS_PAT secret not set — skipping integration tests"
+            echo "::warning::GH_MODELS_PAT secret not set — skipping integration tests"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Start full stack
         if: steps.check-pat.outputs.skip != 'true'
+        env:
+          GH_MODELS_PAT_VALUE: ${{ secrets.GH_MODELS_PAT }}
         run: |
-          cat > .env << EOF
-          GITHUB_MODELS_PAT=${{ secrets.GITHUB_MODELS_PAT }}
-          LITELLM_MASTER_KEY=${{ env.LITELLM_MASTER_KEY }}
-          POSTGRES_DB=${{ env.POSTGRES_DB }}
-          POSTGRES_USER=${{ env.POSTGRES_USER }}
-          POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
-          DATABASE_URL=${{ env.DATABASE_URL }}
-          REDIS_HOST=${{ env.REDIS_HOST }}
-          REDIS_PORT=${{ env.REDIS_PORT }}
-          PRESIDIO_ANALYZER_URL=${{ env.PRESIDIO_ANALYZER_URL }}
-          PRESIDIO_ANALYZER_API_BASE=${{ env.PRESIDIO_ANALYZER_API_BASE }}
-          PRESIDIO_ANONYMIZER_API_BASE=${{ env.PRESIDIO_ANONYMIZER_API_BASE }}
-          EOF
+          echo "GITHUB_MODELS_PAT=${GH_MODELS_PAT_VALUE}" > .env
+          echo "LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}" >> .env
+          echo "POSTGRES_DB=${POSTGRES_DB}" >> .env
+          echo "POSTGRES_USER=${POSTGRES_USER}" >> .env
+          echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> .env
+          echo "DATABASE_URL=${DATABASE_URL}" >> .env
+          echo "REDIS_HOST=${REDIS_HOST}" >> .env
+          echo "REDIS_PORT=${REDIS_PORT}" >> .env
+          echo "PRESIDIO_ANALYZER_URL=${PRESIDIO_ANALYZER_URL}" >> .env
+          echo "PRESIDIO_ANALYZER_API_BASE=${PRESIDIO_ANALYZER_API_BASE}" >> .env
+          echo "PRESIDIO_ANONYMIZER_API_BASE=${PRESIDIO_ANONYMIZER_API_BASE}" >> .env
           docker compose up -d
 
       - name: Wait for gateway
@@ -192,7 +192,7 @@ jobs:
       - name: Run integration tests
         if: steps.check-pat.outputs.skip != 'true'
         run: |
-          pip install -q httpx pytest
+          pip install -q httpx pytest pytest-timeout
           cd tests && LITELLM_MASTER_KEY=${{ env.LITELLM_MASTER_KEY }} \
             pytest -v -m integration --timeout=60
 
