@@ -110,14 +110,34 @@ model_list:
       api_base: "https://models.github.ai/inference"
 
   # ---------------------------------------------------------------------------
-  # Claude Models — NOT available on GitHub Models (2026-02-15)
-  # Uncomment if/when Anthropic models appear on GitHub Models marketplace.
+  # Claude Models (via Anthropic API)
+  # Use ANTHROPIC_API_KEY for direct Anthropic API access
   # ---------------------------------------------------------------------------
-  # - model_name: "claude-sonnet"
-  #   litellm_params:
-  #     model: "openai/anthropic/claude-sonnet-4"
-  #     api_key: "os.environ/GITHUB_MODELS_PAT"
-  #     api_base: "https://models.github.ai/inference"
+  - model_name: "claude-sonnet-4.5"
+    litellm_params:
+      model: "claude-sonnet-4-5-20250929"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+
+  - model_name: "claude-opus-4.6"
+    litellm_params:
+      model: "claude-opus-4-6-20260205"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+
+  - model_name: "claude-haiku-4.5"
+    litellm_params:
+      model: "claude-haiku-4-5-20250820"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+
+  # Aliases for common usage
+  - model_name: "claude-sonnet"
+    litellm_params:
+      model: "claude-sonnet-4-5-20250929"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+
+  - model_name: "claude-opus"
+    litellm_params:
+      model: "claude-opus-4-6-20260205"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
 
 # =============================================================================
 # LiteLLM Settings
