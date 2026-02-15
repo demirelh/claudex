@@ -37,7 +37,7 @@ def test_anthropic_tool_use(team_client):
     r = team_client.post(
         "/v1/messages",
         json={
-            "model": "claude-sonnet",
+            "model": "gpt-4.1-mini",
             "max_tokens": 200,
             "tools": [WEATHER_TOOL_ANTHROPIC],
             "messages": [

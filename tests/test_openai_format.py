@@ -42,7 +42,7 @@ def test_openai_completions_with_system(team_client):
 @pytest.mark.integration
 def test_model_routing(team_client):
     """Different model names route correctly."""
-    for model in ["gpt-4.1-mini", "claude-haiku"]:
+    for model in ["gpt-4.1-mini", "gpt-4.1"]:
         r = team_client.post(
             "/v1/chat/completions",
             json={

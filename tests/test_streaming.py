@@ -48,7 +48,7 @@ def test_anthropic_streaming(team_client, gateway_url, master_key):
             "anthropic-version": "2023-06-01",
         },
         json={
-            "model": "claude-haiku",
+            "model": "gpt-4.1-mini",
             "max_tokens": 50,
             "messages": [{"role": "user", "content": "Count from 1 to 3."}],
             "stream": True,

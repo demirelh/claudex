@@ -14,7 +14,7 @@ def test_anthropic_messages_basic(team_client):
     r = team_client.post(
         "/v1/messages",
         json={
-            "model": "claude-sonnet",
+            "model": "gpt-4.1-mini",
             "max_tokens": 50,
             "messages": [{"role": "user", "content": "Say exactly: hello"}],
         },
@@ -37,7 +37,7 @@ def test_anthropic_messages_with_system(team_client):
     r = team_client.post(
         "/v1/messages",
         json={
-            "model": "claude-sonnet",
+            "model": "gpt-4.1-mini",
             "max_tokens": 50,
             "system": "You always respond with exactly one word.",
             "messages": [{"role": "user", "content": "What color is the sky?"}],
@@ -55,7 +55,7 @@ def test_anthropic_messages_multi_turn(team_client):
     r = team_client.post(
         "/v1/messages",
         json={
-            "model": "claude-haiku",
+            "model": "gpt-4.1-mini",
             "max_tokens": 50,
             "messages": [
                 {"role": "user", "content": "Remember the number 42."},
