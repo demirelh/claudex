@@ -1,0 +1,180 @@
+# =============================================================================
+# LiteLLM Proxy Configuration — GitHub Models Gateway
+# =============================================================================
+# Routes requests through LiteLLM to GitHub Models Inference API,
+# enabling GitHub-based billing.
+#
+# NOTE: Claude/Anthropic models are NOT available on GitHub Models as of
+# 2026-02-15. If Anthropic adds models later, uncomment the Claude section.
+# For now, use OpenAI, Meta, DeepSeek, Mistral, xAI models.
+# =============================================================================
+
+model_list:
+  # ---------------------------------------------------------------------------
+  # OpenAI Models (via GitHub Models)
+  # ---------------------------------------------------------------------------
+  - model_name: "gpt-4.1"
+    litellm_params:
+      model: "openai/openai/gpt-4.1"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  - model_name: "gpt-4.1-mini"
+    litellm_params:
+      model: "openai/openai/gpt-4.1-mini"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  - model_name: "gpt-4.1-nano"
+    litellm_params:
+      model: "openai/openai/gpt-4.1-nano"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  - model_name: "gpt-4o"
+    litellm_params:
+      model: "openai/openai/gpt-4o"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  - model_name: "o3-mini"
+    litellm_params:
+      model: "openai/openai/o3-mini"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  - model_name: "o4-mini"
+    litellm_params:
+      model: "openai/openai/o4-mini"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  # ---------------------------------------------------------------------------
+  # Meta Llama Models (via GitHub Models)
+  # ---------------------------------------------------------------------------
+  - model_name: "llama-4-scout"
+    litellm_params:
+      model: "openai/meta/llama-4-scout-17b-16e-instruct"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  - model_name: "llama-4-maverick"
+    litellm_params:
+      model: "openai/meta/llama-4-maverick-17b-128e-instruct-fp8"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  - model_name: "llama-3.3-70b"
+    litellm_params:
+      model: "openai/meta/llama-3.3-70b-instruct"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  # ---------------------------------------------------------------------------
+  # DeepSeek Models (via GitHub Models)
+  # ---------------------------------------------------------------------------
+  - model_name: "deepseek-r1"
+    litellm_params:
+      model: "openai/deepseek/deepseek-r1"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  # ---------------------------------------------------------------------------
+  # Mistral Models (via GitHub Models)
+  # ---------------------------------------------------------------------------
+  - model_name: "mistral-medium"
+    litellm_params:
+      model: "openai/mistral-ai/mistral-medium-2505"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  - model_name: "codestral"
+    litellm_params:
+      model: "openai/mistral-ai/codestral-2501"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  # ---------------------------------------------------------------------------
+  # xAI Grok (via GitHub Models)
+  # ---------------------------------------------------------------------------
+  - model_name: "grok-3"
+    litellm_params:
+      model: "openai/xai/grok-3"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  - model_name: "grok-3-mini"
+    litellm_params:
+      model: "openai/xai/grok-3-mini"
+      api_key: "os.environ/GITHUB_MODELS_PAT"
+      api_base: "https://models.github.ai/inference"
+
+  # ---------------------------------------------------------------------------
+  # Claude Models — NOT available on GitHub Models (2026-02-15)
+  # Uncomment if/when Anthropic models appear on GitHub Models marketplace.
+  # ---------------------------------------------------------------------------
+  # - model_name: "claude-sonnet"
+  #   litellm_params:
+  #     model: "openai/anthropic/claude-sonnet-4"
+  #     api_key: "os.environ/GITHUB_MODELS_PAT"
+  #     api_base: "https://models.github.ai/inference"
+
+# =============================================================================
+# LiteLLM Settings
+# =============================================================================
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  num_retries: 2
+  request_timeout: 120
+  cache: true
+  cache_params:
+    type: redis
+    host: "os.environ/REDIS_HOST"
+    port: "os.environ/REDIS_PORT"
+    ttl: 3600
+
+# =============================================================================
+# General / Admin Settings
+# =============================================================================
+general_settings:
+  master_key: "os.environ/LITELLM_MASTER_KEY"
+  database_url: "os.environ/DATABASE_URL"
+
+  # Alerting (uncomment when Slack webhook is available)
+  # alerting:
+  #   - slack
+  # alerting_args:
+  #   slack_webhook_url: "os.environ/SLACK_WEBHOOK_URL"
+  #   budget_alerts: true
+
+# =============================================================================
+# Guardrails — PII Masking via Presidio
+# =============================================================================
+guardrails:
+  - guardrail_name: "pii-masking"
+    litellm_params:
+      guardrail: presidio
+      mode: "pre_call"
+      api_base: "os.environ/PRESIDIO_ANALYZER_URL"
+    pii_entities_config:
+      CREDIT_CARD: "MASK"
+      EMAIL_ADDRESS: "MASK"
+      PHONE_NUMBER: "MASK"
+      US_SSN: "MASK"
+      IBAN_CODE: "MASK"
+      IP_ADDRESS: "MASK"
+    presidio_ad_hoc_recognizers:
+      - name: "github_pat_recognizer"
+        supported_language: "en"
+        patterns:
+          - name: "github_pat_fine_grained"
+            regex: "github_pat_[A-Za-z0-9_]{82}"
+            score: 0.95
+          - name: "github_pat_classic"
+            regex: "ghp_[A-Za-z0-9]{36}"
+            score: 0.95
+          - name: "generic_secret_key"
+            regex: "(?i)(sk-|api[_-]?key|secret[_-]?key|token)[\\s=:\"']+[A-Za-z0-9\\-_]{20,}"
+            score: 0.85
+    presidio_filter_scope: "both"
