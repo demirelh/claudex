@@ -93,7 +93,9 @@ sequenceDiagram
 
 ## Available Models
 
-All models are billed through GitHub Enterprise. Current catalog (Feb 2026):
+### Models via GitHub Models API
+
+The following models are billed through GitHub Enterprise via the GitHub Models API:
 
 | Alias | Provider | GitHub Model ID |
 |-------|----------|-----------------|
@@ -112,7 +114,22 @@ All models are billed through GitHub Enterprise. Current catalog (Feb 2026):
 | `grok-3` | xAI | `xai/grok-3` |
 | `grok-3-mini` | xAI | `xai/grok-3-mini` |
 
-> **Note:** Claude/Anthropic models are **not** available on GitHub Models as of 2026-02-15. The config contains a commented-out section to enable them when they appear.
+### Claude Models via Anthropic API
+
+Claude models are available through direct Anthropic API integration:
+
+| Alias | Provider | Model ID | Context Window |
+|-------|----------|----------|----------------|
+| `claude-sonnet-4.5` | Anthropic | `claude-sonnet-4-5-20250929` | 200K tokens |
+| `claude-opus-4.6` | Anthropic | `claude-opus-4-6-20260205` | 1M tokens |
+| `claude-haiku-4.5` | Anthropic | `claude-haiku-4-5-20250820` | 200K tokens |
+| `claude-sonnet` | Anthropic | Alias for Sonnet 4.5 | 200K tokens |
+| `claude-opus` | Anthropic | Alias for Opus 4.6 | 1M tokens |
+
+**Authentication Options for Claude Models:**
+
+1. **Direct Anthropic API** (Recommended): Set `ANTHROPIC_API_KEY` in `.env` with your Anthropic API key
+2. **GitHub Copilot Business**: See [Authentication with GitHub Copilot](#authentication-with-github-copilot) section below
 
 ## Quick Start
 
@@ -299,7 +316,9 @@ Restart with `make restart` after config changes.
 
 ### Environment Variables
 
-See [.env.example](.env.example) for all available variables. Required:
+See [.env.example](.env.example) for all available variables.
+
+**Required for GitHub Models API:**
 
 | Variable | Description |
 |----------|-------------|
@@ -307,6 +326,71 @@ See [.env.example](.env.example) for all available variables. Required:
 | `LITELLM_MASTER_KEY` | Admin key for proxy management |
 | `POSTGRES_PASSWORD` | PostgreSQL password |
 | `DATABASE_URL` | Full PostgreSQL connection string |
+
+**Required for Claude models:**
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Anthropic API key from console.anthropic.com |
+
+## Authentication with GitHub Copilot
+
+If you have a **GitHub Copilot Business** subscription and want to use it to access Claude models instead of getting a separate Anthropic API key, you have two options:
+
+### Option 1: Use Claude Code CLI with GitHub Copilot
+
+The official Claude Code CLI can use your GitHub Copilot subscription:
+
+1. Install Claude Code: `npm install -g @anthropics/claude-code-cli`
+2. Configure to use GitHub Copilot:
+   ```bash
+   claude-code auth github-copilot
+   ```
+3. Use it directly (it bypasses ClaudeX gateway)
+
+### Option 2: Proxy GitHub Copilot through ClaudeX (Advanced)
+
+For centralized control and PII masking, you can configure ClaudeX to proxy requests to GitHub's Copilot API:
+
+1. **Get your GitHub Copilot token:**
+   ```bash
+   # In VS Code with Copilot enabled
+   # Open Command Palette (Cmd/Ctrl+Shift+P)
+   # Run: "GitHub Copilot: Show API Token"
+   ```
+
+2. **Update your `.env` file:**
+   ```bash
+   ANTHROPIC_API_KEY=<your-github-copilot-token>
+   ```
+
+3. **The ClaudeX gateway will route Claude requests through your GitHub Copilot subscription**
+
+**Note:** GitHub Copilot tokens expire and need to be refreshed periodically. For production use, consider using a direct Anthropic API key instead.
+
+## Using Claude Models
+
+Once configured, Claude models work just like any other model:
+
+```bash
+# Set environment variables
+export ANTHROPIC_BASE_URL=http://localhost:4000
+export ANTHROPIC_AUTH_TOKEN=<your-litellm-master-key>
+
+# Use Claude CLI
+claude
+
+# Or via curl
+curl -X POST http://localhost:4000/v1/messages \
+  -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-sonnet-4.5",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
 
 ## License
 
