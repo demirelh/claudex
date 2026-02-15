@@ -76,46 +76,38 @@ Aliases: `claude-sonnet` → Sonnet 4.5, `claude-opus` → Opus 4.6
 
 ## 🏢 Using GitHub Copilot Business
 
-### Option 1: Claude Code CLI (Simplest)
+**Have GitHub Copilot Business but no Anthropic API key?**
 
-If you just want to use Claude and don't need ClaudeX features:
+👉 **See the complete step-by-step guide:** [GITHUB-COPILOT-SETUP.md](./GITHUB-COPILOT-SETUP.md)
+
+### Quick Overview - Two Options:
+
+#### Option 1: Claude Code CLI (Simplest - 5 minutes)
 
 ```bash
-# Install
 npm install -g @anthropics/claude-code-cli
-
-# Authenticate with GitHub Copilot
 claude-code auth github-copilot
-
-# Use it!
-claude-code
+claude-code "Your prompt"
 ```
 
-**Pros:** Free with your Copilot subscription, simple setup
-**Cons:** Bypasses ClaudeX (no PII masking, no budget controls)
+**Best for:** Individual developers who want simple setup
+**Note:** Bypasses ClaudeX gateway (no PII masking or budget controls)
 
-### Option 2: Proxy Through ClaudeX (Advanced)
+#### Option 2: ClaudeX Proxy (Advanced - 20 minutes)
 
-Keep ClaudeX benefits (PII masking, audit logging, budget controls):
+```bash
+# Get GitHub Copilot token from VS Code
+# Edit .env: ANTHROPIC_API_KEY=<your-copilot-token>
+make setup
+export ANTHROPIC_BASE_URL=http://localhost:4000
+export ANTHROPIC_AUTH_TOKEN=<litellm-master-key>
+claude
+```
 
-1. **Get GitHub Copilot token:**
-   - Open VS Code with Copilot
-   - Command Palette (Cmd/Ctrl+Shift+P)
-   - Run: "GitHub Copilot: Show API Token"
-   - Copy the token
+**Best for:** Teams needing PII masking, audit logs, budget controls
+**Note:** Copilot tokens expire periodically and need refresh
 
-2. **Configure ClaudeX:**
-   ```bash
-   # In .env:
-   ANTHROPIC_API_KEY=<your-github-copilot-token>
-   ```
-
-3. **Restart and use:**
-   ```bash
-   make restart
-   ```
-
-⚠️ **Note:** Copilot tokens expire! For production, use Anthropic API key.
+📖 **[Full detailed guide with screenshots and troubleshooting →](./GITHUB-COPILOT-SETUP.md)**
 
 ## 🔍 Troubleshooting
 

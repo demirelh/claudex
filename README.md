@@ -335,9 +335,13 @@ See [.env.example](.env.example) for all available variables.
 
 ## Authentication with GitHub Copilot
 
-If you have a **GitHub Copilot Business** subscription and want to use it to access Claude models instead of getting a separate Anthropic API key, you have two options:
+If you have a **GitHub Copilot Business** subscription and want to use it to access Claude models instead of getting a separate Anthropic API key:
 
-### Option 1: Use Claude Code CLI with GitHub Copilot
+👉 **[Complete Step-by-Step Guide for GitHub Copilot Business Users →](docs/GITHUB-COPILOT-SETUP.md)**
+
+### Quick Summary - Two Options
+
+#### Option 1: Use Claude Code CLI with GitHub Copilot (Simplest)
 
 The official Claude Code CLI can use your GitHub Copilot subscription:
 
@@ -348,7 +352,9 @@ The official Claude Code CLI can use your GitHub Copilot subscription:
    ```
 3. Use it directly (it bypasses ClaudeX gateway)
 
-### Option 2: Proxy GitHub Copilot through ClaudeX (Advanced)
+**Best for:** Individual developers, simple setup (5 minutes)
+
+#### Option 2: Proxy GitHub Copilot through ClaudeX (Advanced)
 
 For centralized control and PII masking, you can configure ClaudeX to proxy requests to GitHub's Copilot API:
 
@@ -364,9 +370,19 @@ For centralized control and PII masking, you can configure ClaudeX to proxy requ
    ANTHROPIC_API_KEY=<your-github-copilot-token>
    ```
 
-3. **The ClaudeX gateway will route Claude requests through your GitHub Copilot subscription**
+3. **Start ClaudeX and configure Claude CLI:**
+   ```bash
+   make setup
+   export ANTHROPIC_BASE_URL=http://localhost:4000
+   export ANTHROPIC_AUTH_TOKEN=<your-litellm-master-key>
+   claude
+   ```
+
+**Best for:** Teams needing PII masking, audit logs, budget controls
 
 **Note:** GitHub Copilot tokens expire and need to be refreshed periodically. For production use, consider using a direct Anthropic API key instead.
+
+📖 **[See detailed guide with troubleshooting →](docs/GITHUB-COPILOT-SETUP.md)**
 
 ## Using Claude Models
 
