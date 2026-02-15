@@ -1,0 +1,255 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LITELLM_MASTER_KEY: sk-ci-test-key-not-a-real-secret
+  POSTGRES_DB: litellm
+  POSTGRES_USER: litellm
+  POSTGRES_PASSWORD: ci-test-password
+  DATABASE_URL: postgresql://litellm:ci-test-password@postgres:5432/litellm
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  PRESIDIO_ANALYZER_URL: http://presidio-analyzer:3000
+  PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
+  PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
+
+jobs:
+  # ===========================================================================
+  # Lint & Validate — fast checks, no Docker needed
+  # ===========================================================================
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate YAML configs
+        run: |
+          python3 -c "
+          import yaml, sys
+          for f in ['config/litellm-config.yaml', 'docker-compose.yaml']:
+              try:
+                  yaml.safe_load(open(f))
+                  print(f'OK: {f}')
+              except Exception as e:
+                  print(f'FAIL: {f} — {e}')
+                  sys.exit(1)
+          "
+
+      - name: Validate Kustomize manifests
+        uses: azure/setup-kubectl@v4
+      - run: kubectl kustomize k8s/base > /dev/null
+      - run: kubectl kustomize k8s/overlays/production > /dev/null
+
+      - name: Check for secrets in committed files
+        run: |
+          echo "Scanning for potential secrets..."
+          FOUND=0
+          for pattern in 'ghp_[A-Za-z0-9]{36}' 'github_pat_[A-Za-z0-9_]{82}' 'sk-[a-f0-9]{64}'; do
+            if grep -rE "$pattern" --include='*.yaml' --include='*.yml' --include='*.json' --include='*.sh' --include='*.py' --include='*.md' . 2>/dev/null | grep -v '.env.example' | grep -v 'README.md' | grep -v 'regex' | grep -v 'pattern'; then
+              echo "WARN: Possible secret matching $pattern"
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            echo "::warning::Potential secrets detected in committed files"
+          else
+            echo "No secrets found."
+          fi
+
+  # ===========================================================================
+  # Unit Tests — gateway infrastructure, auth, format translation
+  # ===========================================================================
+  test-infra:
+    name: Infrastructure Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start infrastructure services
+        run: |
+          cat > .env << 'EOF'
+          GITHUB_MODELS_PAT=ghp_placeholder_not_used_for_infra_tests
+          LITELLM_MASTER_KEY=${{ env.LITELLM_MASTER_KEY }}
+          POSTGRES_DB=${{ env.POSTGRES_DB }}
+          POSTGRES_USER=${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
+          DATABASE_URL=${{ env.DATABASE_URL }}
+          REDIS_HOST=${{ env.REDIS_HOST }}
+          REDIS_PORT=${{ env.REDIS_PORT }}
+          PRESIDIO_ANALYZER_URL=${{ env.PRESIDIO_ANALYZER_URL }}
+          PRESIDIO_ANALYZER_API_BASE=${{ env.PRESIDIO_ANALYZER_API_BASE }}
+          PRESIDIO_ANONYMIZER_API_BASE=${{ env.PRESIDIO_ANONYMIZER_API_BASE }}
+          EOF
+          docker compose up -d
+
+      - name: Wait for gateway to become healthy
+        run: |
+          echo "Waiting for LiteLLM proxy..."
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:4000/health/liveliness > /dev/null 2>&1; then
+              echo "Healthy after $((i*3))s"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Gateway did not become healthy within 180s"
+          docker compose logs litellm | tail -50
+          exit 1
+
+      - name: Run health tests
+        run: |
+          pip install -q httpx pytest
+          cd tests && pytest test_health.py -v
+
+      - name: Run auth tests
+        run: |
+          cd tests && LITELLM_MASTER_KEY=${{ env.LITELLM_MASTER_KEY }} pytest test_auth.py -v
+
+      - name: Run rate limiting tests
+        run: |
+          cd tests && LITELLM_MASTER_KEY=${{ env.LITELLM_MASTER_KEY }} pytest test_rate_limiting.py -v
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== LiteLLM Logs ==="
+          docker compose logs litellm | tail -100
+          echo "=== Postgres Logs ==="
+          docker compose logs postgres | tail -20
+          echo "=== Redis Logs ==="
+          docker compose logs redis | tail -20
+          echo "=== Container Status ==="
+          docker compose ps
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
+
+  # ===========================================================================
+  # Integration Tests — real LLM calls via GitHub Models
+  # ===========================================================================
+  test-integration:
+    name: Integration Tests (Live API)
+    runs-on: ubuntu-latest
+    needs: test-infra
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for GitHub Models PAT
+        id: check-pat
+        run: |
+          if [ -z "${{ secrets.GITHUB_MODELS_PAT }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::GITHUB_MODELS_PAT secret not set — skipping integration tests"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Start full stack
+        if: steps.check-pat.outputs.skip != 'true'
+        run: |
+          cat > .env << EOF
+          GITHUB_MODELS_PAT=${{ secrets.GITHUB_MODELS_PAT }}
+          LITELLM_MASTER_KEY=${{ env.LITELLM_MASTER_KEY }}
+          POSTGRES_DB=${{ env.POSTGRES_DB }}
+          POSTGRES_USER=${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }}
+          DATABASE_URL=${{ env.DATABASE_URL }}
+          REDIS_HOST=${{ env.REDIS_HOST }}
+          REDIS_PORT=${{ env.REDIS_PORT }}
+          PRESIDIO_ANALYZER_URL=${{ env.PRESIDIO_ANALYZER_URL }}
+          PRESIDIO_ANALYZER_API_BASE=${{ env.PRESIDIO_ANALYZER_API_BASE }}
+          PRESIDIO_ANONYMIZER_API_BASE=${{ env.PRESIDIO_ANONYMIZER_API_BASE }}
+          EOF
+          docker compose up -d
+
+      - name: Wait for gateway
+        if: steps.check-pat.outputs.skip != 'true'
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:4000/health/liveliness > /dev/null 2>&1; then
+              echo "Healthy after $((i*3))s"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Gateway did not become healthy"
+          docker compose logs litellm | tail -50
+          exit 1
+
+      - name: Run integration tests
+        if: steps.check-pat.outputs.skip != 'true'
+        run: |
+          pip install -q httpx pytest
+          cd tests && LITELLM_MASTER_KEY=${{ env.LITELLM_MASTER_KEY }} \
+            pytest -v -m integration --timeout=60
+
+      - name: Run guardrail tests
+        if: steps.check-pat.outputs.skip != 'true'
+        run: |
+          cd tests && LITELLM_MASTER_KEY=${{ env.LITELLM_MASTER_KEY }} \
+            pytest -v -m guardrails --timeout=60
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== LiteLLM Logs ==="
+          docker compose logs litellm | tail -100
+          echo "=== Container Status ==="
+          docker compose ps
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
+
+  # ===========================================================================
+  # Security Scan — container images + config
+  # ===========================================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull LiteLLM image
+        run: docker pull ghcr.io/berriai/litellm:main-latest
+
+      - name: Run Trivy on LiteLLM image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/berriai/litellm:main-latest
+          format: table
+          exit-code: 0              # Don't fail on vulns (informational)
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Scan repo for secrets (Trivy filesystem)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          exit-code: 1              # Fail if secrets found in repo
+          scanners: secret
+
+      - name: Validate no .env committed
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env file is tracked by git — this must not be committed"
+            exit 1
+          else
+            echo ".env is not tracked. Good."
+          fi
