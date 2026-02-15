@@ -6,26 +6,89 @@ Built on [LiteLLM Proxy](https://github.com/BerriAI/litellm) with PII masking, r
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    subgraph clients["Developer Workstation"]
+        claude["Claude Code"]
+        vscode["VS Code / Cursor"]
+        sdk["OpenAI SDK / curl"]
+    end
+
+    subgraph gateway["Internal Network (Docker / K8s)"]
+        direction TB
+        subgraph litellm["LiteLLM Proxy :4000"]
+            direction LR
+            auth["Auth\n+ Virtual Keys\n+ Rate Limits"]
+            format["Format Translation\nAnthropic ↔ OpenAI"]
+            guardrails["Guardrails\n+ PII Masking"]
+            cache["Response Cache"]
+        end
+
+        subgraph backing["Backing Services"]
+            direction LR
+            postgres[("PostgreSQL\nKeys, Budgets,\nAudit Logs")]
+            redis[("Redis\nCache +\nRate Limits")]
+        end
+
+        subgraph presidio["Presidio PII Engine"]
+            direction LR
+            analyzer["Analyzer :3000\nDetect PII"]
+            anonymizer["Anonymizer :3000\nMask PII"]
+        end
+    end
+
+    subgraph github["GitHub Cloud"]
+        models["GitHub Models API\nmodels.github.ai/inference"]
+        billing["GitHub Enterprise\nBilling"]
+    end
+
+    subgraph mcp["Code Context (MCP)"]
+        ghserver["GitHub MCP Server\n77 tools: repos, PRs,\nissues, search"]
+    end
+
+    claude -- "ANTHROPIC_BASE_URL\n/v1/messages" --> litellm
+    vscode -- "/v1/chat/completions" --> litellm
+    sdk -- "/v1/chat/completions" --> litellm
+
+    auth --> guardrails
+    guardrails --> format
+    format --> cache
+
+    litellm --> postgres
+    litellm --> redis
+    guardrails -.-> analyzer
+    guardrails -.-> anonymizer
+
+    cache -- "OpenAI format\nBearer PAT" --> models
+    models --> billing
+
+    claude -. "stdio" .-> ghserver
+    ghserver -. "GitHub API" .-> github
 ```
-Developer Workstation                    Internal Network (Docker/K8s)
-┌─────────────────┐                     ┌──────────────────────────────────┐
-│  Claude Code /   │  ANTHROPIC_BASE_URL │  LiteLLM Proxy (:4000)          │
-│  VS Code /       │────────────────────▶│  ┌────────┐ ┌────────┐         │
-│  Any OpenAI SDK  │                     │  │  Auth   │ │  PII   │         │
-└─────────────────┘                     │  │  + Rate │ │ Masking│         │
-                                        │  │  Limit  │ │Presidio│         │
-                                        │  └────┬───┘ └────┬───┘         │
-                                        │       └─────┬────┘              │
-                                        │             │ Format Translation │
-                                        │             │ Anthropic ↔ OpenAI │
-                                        └─────────────┼──────────────────┘
-                                                      │
-                                                      ▼
-                                        ┌──────────────────────────────┐
-                                        │  GitHub Models API           │
-                                        │  models.github.ai/inference  │
-                                        │  Billing: GitHub Enterprise  │
-                                        └──────────────────────────────┘
+
+### Request Flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant L as LiteLLM Proxy
+    participant P as Presidio
+    participant G as GitHub Models API
+
+    C->>L: POST /v1/messages (Anthropic format)
+    activate L
+    L->>L: Authenticate virtual key
+    L->>L: Check budget + rate limits
+    L->>P: Scan prompt for PII
+    P-->>L: Masked prompt
+    L->>L: Translate Anthropic → OpenAI format
+    L->>G: POST /chat/completions (OpenAI format)
+    G-->>L: OpenAI response
+    L->>P: Scan response for PII
+    P-->>L: Masked response
+    L->>L: Translate OpenAI → Anthropic format
+    L-->>C: Anthropic Messages response
+    deactivate L
 ```
 
 ## Available Models
