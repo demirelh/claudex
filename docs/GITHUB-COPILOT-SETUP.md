@@ -26,19 +26,31 @@ This is the **easiest** method but bypasses ClaudeX gateway features.
 
 ### Step 1: Install Claude Code CLI
 
+**Recommended: Native Installer (auto-updates)**
+
 ```bash
-npm install -g @anthropics/claude-code-cli
+# macOS/Linux/WSL
+curl -fsSL https://claude.ai/install.sh | bash
+
+# Windows PowerShell
+irm https://claude.ai/install.ps1 | iex
+```
+
+**Alternative: npm (deprecated, requires Node.js 18+)**
+
+```bash
+npm install -g @anthropic-ai/claude-code
 ```
 
 **Verify installation:**
 ```bash
-claude-code --version
+claude --version
 ```
 
 ### Step 2: Authenticate with GitHub Copilot
 
 ```bash
-claude-code auth github-copilot
+claude auth github-copilot
 ```
 
 This will:
@@ -50,20 +62,20 @@ This will:
 
 ```bash
 # Test with a simple prompt
-claude-code "Write a hello world in Python"
+claude "Write a hello world in Python"
 ```
 
 ### Step 4: Use It Like Regular Claude
 
 ```bash
 # Interactive mode
-claude-code
+claude
 
 # Single prompt mode
-claude-code "Explain async/await in JavaScript"
+claude "Explain async/await in JavaScript"
 
 # With specific model
-claude-code --model claude-opus-4.6 "Complex architecture question"
+claude --model claude-opus-4.6 "Complex architecture question"
 ```
 
 ### Available Models via Claude Code CLI
@@ -484,9 +496,16 @@ curl http://localhost:4000/key/info \
 
 ### Option 1: Claude Code CLI (Simple)
 ```bash
-npm install -g @anthropics/claude-code-cli
-claude-code auth github-copilot
-claude-code "Your prompt here"
+# Install (recommended: native installer)
+curl -fsSL https://claude.ai/install.sh | bash  # macOS/Linux
+# or
+npm install -g @anthropic-ai/claude-code        # Alternative
+
+# Authenticate
+claude auth github-copilot
+
+# Use
+claude "Your prompt here"
 ```
 ✅ Best for: Individual developers, quick setup
 

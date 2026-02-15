@@ -345,10 +345,20 @@ If you have a **GitHub Copilot Business** subscription and want to use it to acc
 
 The official Claude Code CLI can use your GitHub Copilot subscription:
 
-1. Install Claude Code: `npm install -g @anthropics/claude-code-cli`
+1. Install Claude Code:
+   ```bash
+   # Recommended: Native installer (auto-updates)
+   curl -fsSL https://claude.ai/install.sh | bash  # macOS/Linux
+   # or
+   irm https://claude.ai/install.ps1 | iex         # Windows
+
+   # Alternative: npm (deprecated)
+   npm install -g @anthropic-ai/claude-code
+   ```
+
 2. Configure to use GitHub Copilot:
    ```bash
-   claude-code auth github-copilot
+   claude auth github-copilot
    ```
 3. Use it directly (it bypasses ClaudeX gateway)
 

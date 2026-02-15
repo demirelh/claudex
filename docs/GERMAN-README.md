@@ -71,14 +71,19 @@ Wenn du bereits GitHub Copilot Business hast und keine separate Anthropic-Rechnu
 #### 2a. Claude Code CLI direkt nutzen (Einfachste Methode)
 
 ```bash
-# Installieren
-npm install -g @anthropics/claude-code-cli
+# Empfohlen: Native Installer (automatische Updates)
+curl -fsSL https://claude.ai/install.sh | bash  # macOS/Linux
+# oder
+irm https://claude.ai/install.ps1 | iex         # Windows
+
+# Alternative: npm (veraltet)
+npm install -g @anthropic-ai/claude-code
 
 # Mit GitHub Copilot authentifizieren
-claude-code auth github-copilot
+claude auth github-copilot
 
 # Verwenden (umgeht ClaudeX Gateway)
-claude-code
+claude
 ```
 
 **Vorteil:** Keine zusätzlichen Kosten, nutzt deine Copilot-Lizenz

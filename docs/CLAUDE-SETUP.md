@@ -85,9 +85,19 @@ Aliases: `claude-sonnet` → Sonnet 4.5, `claude-opus` → Opus 4.6
 #### Option 1: Claude Code CLI (Simplest - 5 minutes)
 
 ```bash
-npm install -g @anthropics/claude-code-cli
-claude-code auth github-copilot
-claude-code "Your prompt"
+# Recommended: Native installer (auto-updates)
+curl -fsSL https://claude.ai/install.sh | bash  # macOS/Linux
+# or
+irm https://claude.ai/install.ps1 | iex         # Windows
+
+# Alternative: npm (deprecated)
+npm install -g @anthropic-ai/claude-code
+
+# Authenticate with GitHub Copilot
+claude auth github-copilot
+
+# Use it
+claude "Your prompt"
 ```
 
 **Best for:** Individual developers who want simple setup
