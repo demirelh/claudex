@@ -2,10 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: litellm-proxy
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: litellm-proxy
-    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/part-of: claudex
 spec:
   replicas: 2
   selector:
@@ -34,17 +34,17 @@ spec:
             - name: GITHUB_MODELS_PAT
               valueFrom:
                 secretKeyRef:
-                  name: ai-gateway-secrets
+                  name: claudex-secrets
                   key: GITHUB_MODELS_PAT
             - name: LITELLM_MASTER_KEY
               valueFrom:
                 secretKeyRef:
-                  name: ai-gateway-secrets
+                  name: claudex-secrets
                   key: LITELLM_MASTER_KEY
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: ai-gateway-secrets
+                  name: claudex-secrets
                   key: DATABASE_URL
             - name: REDIS_HOST
               value: "redis"
@@ -90,7 +90,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: litellm-proxy
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: litellm-proxy
 spec:

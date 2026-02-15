@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: ai-gateway
+namespace: claudex
 
 resources:
   - namespace.yaml
@@ -17,4 +17,4 @@ resources:
 
 commonLabels:
   app.kubernetes.io/managed-by: kustomize
-  app.kubernetes.io/part-of: ai-gateway
+  app.kubernetes.io/part-of: claudex

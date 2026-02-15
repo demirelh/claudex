@@ -2,7 +2,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: litellm-proxy-hpa
-  namespace: ai-gateway
+  namespace: claudex
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -41,7 +41,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: litellm-proxy-pdb
-  namespace: ai-gateway
+  namespace: claudex
 spec:
   minAvailable: 1
   selector:

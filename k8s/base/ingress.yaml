@@ -1,8 +1,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ai-gateway-ingress
-  namespace: ai-gateway
+  name: claudex-ingress
+  namespace: claudex
   annotations:
     # Adjust annotations for your ingress controller
     nginx.ingress.kubernetes.io/proxy-body-size: "1m"
@@ -15,10 +15,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - ai-gateway.internal
-      secretName: ai-gateway-tls
+        - claudex.internal
+      secretName: claudex-tls
   rules:
-    - host: ai-gateway.internal
+    - host: claudex.internal
       http:
         paths:
           - path: /

@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: litellm-config
-  namespace: ai-gateway
+  namespace: claudex
 data:
   config.yaml: |
     model_list:

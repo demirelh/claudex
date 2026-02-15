@@ -1,6 +1,6 @@
 services:
   # ===========================================================================
-  # LiteLLM Proxy — AI Gateway
+  # LiteLLM Proxy — ClaudeX
   # ===========================================================================
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
@@ -32,7 +32,7 @@ services:
       start_period: 30s
     restart: unless-stopped
     networks:
-      - ai-gateway
+      - claudex
 
   # ===========================================================================
   # PostgreSQL — Key/Spend Tracking
@@ -52,7 +52,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - ai-gateway
+      - claudex
 
   # ===========================================================================
   # Redis — Caching + Rate Limiting
@@ -69,7 +69,7 @@ services:
       retries: 5
     restart: unless-stopped
     networks:
-      - ai-gateway
+      - claudex
 
   # ===========================================================================
   # Presidio — PII Detection & Anonymization
@@ -78,7 +78,7 @@ services:
     image: mcr.microsoft.com/presidio-analyzer:latest
     restart: unless-stopped
     networks:
-      - ai-gateway
+      - claudex
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/health')"]
       interval: 30s
@@ -90,7 +90,7 @@ services:
     image: mcr.microsoft.com/presidio-anonymizer:latest
     restart: unless-stopped
     networks:
-      - ai-gateway
+      - claudex
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/health')"]
       interval: 30s
@@ -103,5 +103,5 @@ volumes:
   redisdata:
 
 networks:
-  ai-gateway:
+  claudex:
     driver: bridge

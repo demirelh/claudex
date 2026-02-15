@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# AI Gateway — Local Setup Script
+# ClaudeX — Local Setup Script
 # =============================================================================
 # Usage: ./scripts/setup.sh
 # Prerequisites: docker, docker compose
@@ -12,7 +12,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-echo "=== AI Gateway Local Setup ==="
+echo "=== ClaudeX Local Setup ==="
 
 # --- 1. Check prerequisites ---
 for cmd in docker; do
@@ -92,7 +92,7 @@ echo ""
 echo "Gateway URL:  http://localhost:4000"
 echo "Health check: curl http://localhost:4000/health"
 echo ""
-echo "To configure Claude Code:"
+echo "To configure ClaudeX:"
 echo "  export ANTHROPIC_BASE_URL=http://localhost:4000"
 echo "  export ANTHROPIC_AUTH_TOKEN=${LITELLM_MASTER_KEY}"
 echo "  claude"

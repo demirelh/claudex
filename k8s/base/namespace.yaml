@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ai-gateway
+  name: claudex
   labels:
-    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/part-of: claudex
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

@@ -1,4 +1,4 @@
-"""Shared fixtures for the AI Gateway test suite."""
+"""Shared fixtures for the ClaudeX test suite."""
 
 import os
 import pytest

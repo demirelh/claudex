@@ -1,4 +1,4 @@
-name: CI
+name: ClaudeX CI
 
 on:
   push:

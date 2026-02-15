@@ -2,10 +2,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: redis
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: redis
-    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/part-of: claudex
 spec:
   serviceName: redis
   replicas: 1
@@ -65,7 +65,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: redis
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: redis
 spec:

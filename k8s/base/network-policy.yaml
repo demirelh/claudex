@@ -5,7 +5,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-all
-  namespace: ai-gateway
+  namespace: claudex
 spec:
   podSelector: {}
   policyTypes:
@@ -17,7 +17,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-internal
-  namespace: ai-gateway
+  namespace: claudex
 spec:
   podSelector: {}
   policyTypes:
@@ -27,12 +27,12 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: ai-gateway
+              kubernetes.io/metadata.name: claudex
   egress:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: ai-gateway
+              kubernetes.io/metadata.name: claudex
     # DNS resolution
     - to:
         - namespaceSelector: {}
@@ -50,7 +50,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: litellm-egress-github
-  namespace: ai-gateway
+  namespace: claudex
 spec:
   podSelector:
     matchLabels:
@@ -70,7 +70,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: litellm-ingress
-  namespace: ai-gateway
+  namespace: claudex
 spec:
   podSelector:
     matchLabels:

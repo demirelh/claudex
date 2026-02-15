@@ -62,10 +62,10 @@ k8s-deploy-prod: ## Deploy to K8s (production overlay)
 	kubectl apply -k k8s/overlays/production
 
 k8s-status: ## Show K8s pod status
-	kubectl get pods -n ai-gateway -o wide
+	kubectl get pods -n claudex -o wide
 
 k8s-logs: ## Tail K8s LiteLLM logs
-	kubectl logs -n ai-gateway -l app=litellm-proxy -f --tail=50
+	kubectl logs -n claudex -l app=litellm-proxy -f --tail=50
 
 # === Cleanup ===
 

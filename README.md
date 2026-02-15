@@ -1,6 +1,6 @@
-# AI Gateway
+# ClaudeX
 
-Enterprise AI Gateway that routes LLM requests through [GitHub Models API](https://docs.github.com/en/github-models), enabling centralized billing via GitHub Enterprise.
+Enterprise AI gateway that routes LLM requests through [GitHub Models API](https://docs.github.com/en/github-models), enabling centralized billing via GitHub Enterprise.
 
 Built on [LiteLLM Proxy](https://github.com/BerriAI/litellm) with PII masking, rate limiting, team-based API keys, and full audit logging.
 
@@ -9,7 +9,7 @@ Built on [LiteLLM Proxy](https://github.com/BerriAI/litellm) with PII masking, r
 ```mermaid
 flowchart TB
     subgraph clients["Developer Workstation"]
-        claude["Claude Code"]
+        claudex["ClaudeX CLI"]
         vscode["VS Code / Cursor"]
         sdk["OpenAI SDK / curl"]
     end
@@ -46,7 +46,7 @@ flowchart TB
         ghserver["GitHub MCP Server\n77 tools: repos, PRs,\nissues, search"]
     end
 
-    claude -- "ANTHROPIC_BASE_URL\n/v1/messages" --> litellm
+    claudex -- "ANTHROPIC_BASE_URL\n/v1/messages" --> litellm
     vscode -- "/v1/chat/completions" --> litellm
     sdk -- "/v1/chat/completions" --> litellm
 
@@ -62,7 +62,7 @@ flowchart TB
     cache -- "OpenAI format\nBearer PAT" --> models
     models --> billing
 
-    claude -. "stdio" .-> ghserver
+    claudex -. "stdio" .-> ghserver
     ghserver -. "GitHub API" .-> github
 ```
 
@@ -124,8 +124,8 @@ All models are billed through GitHub Enterprise. Current catalog (Feb 2026):
 ### 1. Setup
 
 ```bash
-git clone https://github.com/demirelh/ai-gateway.git
-cd ai-gateway
+git clone https://github.com/demirelh/claudex.git
+cd claudex
 make setup
 ```
 
@@ -149,7 +149,7 @@ make test-quick
 export ANTHROPIC_BASE_URL=http://localhost:4000
 export ANTHROPIC_AUTH_TOKEN=<your-litellm-master-key>
 
-# Claude Code works through the gateway
+# ClaudeX works through the gateway
 claude
 
 # Or use curl directly (OpenAI format)
@@ -202,7 +202,7 @@ Each team key enforces:
 ## Project Structure
 
 ```
-ai-gateway/
+claudex/
 ├── config/
 │   ├── litellm-config.yaml      # Model routing, guardrails, cache config
 │   └── managed-mcp.json         # Org-wide MCP policy template
@@ -265,7 +265,7 @@ make k8s-deploy-prod
 
 The K8s setup includes:
 - **Pod Security Standards**: `restricted` profile
-- **NetworkPolicies**: egress only to `models.github.ai:443`
+- **NetworkPolicies**: Egress only to `models.github.ai:443`
 - **HPA**: auto-scale 2-8 (base) or 3-16 (prod) replicas on CPU/memory
 - **PDB**: minimum 1 pod always available
 - **Ingress**: internal-only with IP whitelist and SSE streaming support

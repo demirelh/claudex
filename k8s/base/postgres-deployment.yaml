@@ -2,10 +2,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: postgres
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: postgres
-    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/part-of: claudex
 spec:
   serviceName: postgres
   replicas: 1
@@ -37,7 +37,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: ai-gateway-secrets
+                  name: claudex-secrets
                   key: POSTGRES_PASSWORD
           resources:
             requests:
@@ -74,7 +74,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: postgres
 spec:

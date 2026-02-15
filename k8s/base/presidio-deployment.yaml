@@ -2,10 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: presidio-analyzer
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: presidio-analyzer
-    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/part-of: claudex
 spec:
   replicas: 1
   selector:
@@ -56,7 +56,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: presidio-analyzer
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: presidio-analyzer
 spec:
@@ -71,10 +71,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: presidio-anonymizer
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: presidio-anonymizer
-    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/part-of: claudex
 spec:
   replicas: 1
   selector:
@@ -119,7 +119,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: presidio-anonymizer
-  namespace: ai-gateway
+  namespace: claudex
   labels:
     app: presidio-anonymizer
 spec:
