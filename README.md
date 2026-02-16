@@ -246,8 +246,8 @@ Settings are stored in `~/.config/claudex/config.json`:
 ```json
 {
   "default_model": "sonnet",
-  "temperature": 0.7,
-  "max_tokens": 8096,
+  "temperature": 0.0,
+  "max_tokens": 16384,
   "system_prompt": null,
   "plan_model": "opus",
   "exec_model": "sonnet",

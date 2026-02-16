@@ -3,8 +3,10 @@
 Communicates with the GitHub Copilot Chat Completions API at
 api.githubcopilot.com using the OpenAI-compatible format.
 Supports function calling / tool use.
+Auto-retries on transient network errors (connection drops, incomplete reads).
 """
 
+import asyncio
 import json
 import sys
 from dataclasses import dataclass, field
@@ -15,6 +17,10 @@ import httpx
 from .auth import CopilotToken
 
 COPILOT_CHAT_URL = "https://api.githubcopilot.com/chat/completions"
+
+# Max retries for transient network errors during streaming
+MAX_STREAM_RETRIES = 2
+RETRY_DELAY_SECONDS = 1.5
 
 # Headers that identify the client to the Copilot API.
 BASE_HEADERS = {
@@ -97,6 +103,21 @@ async def _handle_error_response(response) -> None:
         )
 
 
+# Transient network errors that are safe to retry
+_RETRYABLE_ERRORS = (
+    httpx.RemoteProtocolError,  # "peer closed connection without sending complete message body"
+    httpx.ReadError,            # read operation failed
+    httpx.ConnectError,         # connection refused / reset
+    httpx.CloseError,           # error closing connection
+    httpx.ReadTimeout,          # read timed out (not connect timeout)
+)
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Check if an exception is a transient network error worth retrying."""
+    return isinstance(exc, _RETRYABLE_ERRORS)
+
+
 async def stream_chat_with_tools(
     token: CopilotToken,
     messages: list[dict],
@@ -150,78 +171,131 @@ async def stream_chat_with_tools(
     import time
     start_time = time.monotonic()
 
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(180.0, connect=15.0)
-    ) as client:
-        async with client.stream(
-            "POST", COPILOT_CHAT_URL, json=body, headers=headers
-        ) as response:
-            await _handle_error_response(response)
+    # Callback wrapper that logs retries to stderr
+    def _on_retry(attempt: int, exc: Exception, partial_content: str):
+        """Notify the user about a retry (via on_content_chunk or stderr)."""
+        partial_len = len(partial_content)
+        msg = (
+            f"\n  ⟳ Connection lost ({type(exc).__name__}), "
+            f"retrying ({attempt}/{MAX_STREAM_RETRIES})..."
+        )
+        if partial_len:
+            msg += f" ({partial_len} chars preserved)"
+        msg += "\n"
+        if on_content_chunk:
+            on_content_chunk(msg)
+        else:
+            sys.stderr.write(msg)
 
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
+    last_error: Optional[Exception] = None
 
-                data = line[6:]
-                if data.strip() == "[DONE]":
-                    break
+    for attempt in range(MAX_STREAM_RETRIES + 1):
+        if attempt > 0:
+            # Wait before retry
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
+            # For continuation: if we had partial content, append it to
+            # messages so the model can continue from where it left off
+            if result.content:
+                continuation_messages = list(messages) + [
+                    {"role": "assistant", "content": result.content},
+                    {"role": "user", "content": "Continue from where you left off. Do not repeat what you already said."},
+                ]
+            else:
+                continuation_messages = messages
+            # Reset result for this attempt but keep partial content
+            partial_content = result.content
+            result = StreamResult()
+            result.content = partial_content
+            tool_calls_by_index = {}
+            first_token_received = bool(partial_content)
 
-                try:
-                    chunk = json.loads(data)
+        try:
+            current_messages = messages if attempt == 0 else continuation_messages
 
-                    # Track usage if present
-                    usage = chunk.get("usage")
-                    if usage:
-                        result.prompt_tokens = usage.get("prompt_tokens", 0)
-                        result.completion_tokens = usage.get("completion_tokens", 0)
-                        result.total_tokens = usage.get("total_tokens", 0)
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(180.0, connect=15.0)
+            ) as client:
+                async with client.stream(
+                    "POST", COPILOT_CHAT_URL, json=body, headers=headers
+                ) as response:
+                    await _handle_error_response(response)
 
-                    choices = chunk.get("choices", [])
-                    if not choices:
-                        continue
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
 
-                    choice = choices[0]
-                    delta = choice.get("delta", {})
-                    finish = choice.get("finish_reason")
+                        data = line[6:]
+                        if data.strip() == "[DONE]":
+                            break
 
-                    if finish:
-                        result.finish_reason = finish
+                        try:
+                            chunk = json.loads(data)
 
-                    # --- Text content ---
-                    content = delta.get("content")
-                    if content:
-                        if not first_token_received:
-                            first_token_received = True
-                            result.time_to_first_token = time.monotonic() - start_time
-                        result.content += content
-                        if on_content_chunk:
-                            on_content_chunk(content)
+                            # Track usage if present
+                            usage = chunk.get("usage")
+                            if usage:
+                                result.prompt_tokens = usage.get("prompt_tokens", 0)
+                                result.completion_tokens = usage.get("completion_tokens", 0)
+                                result.total_tokens = usage.get("total_tokens", 0)
 
-                    # --- Tool calls ---
-                    tc_deltas = delta.get("tool_calls", [])
-                    for tc_delta in tc_deltas:
-                        if not first_token_received:
-                            first_token_received = True
-                            result.time_to_first_token = time.monotonic() - start_time
+                            choices = chunk.get("choices", [])
+                            if not choices:
+                                continue
 
-                        idx = tc_delta.get("index", 0)
+                            choice = choices[0]
+                            delta = choice.get("delta", {})
+                            finish = choice.get("finish_reason")
 
-                        if idx not in tool_calls_by_index:
-                            tool_calls_by_index[idx] = ToolCall()
+                            if finish:
+                                result.finish_reason = finish
 
-                        tc = tool_calls_by_index[idx]
+                            # --- Text content ---
+                            content = delta.get("content")
+                            if content:
+                                if not first_token_received:
+                                    first_token_received = True
+                                    result.time_to_first_token = time.monotonic() - start_time
+                                result.content += content
+                                if on_content_chunk:
+                                    on_content_chunk(content)
 
-                        if "id" in tc_delta and tc_delta["id"]:
-                            tc.id = tc_delta["id"]
+                            # --- Tool calls ---
+                            tc_deltas = delta.get("tool_calls", [])
+                            for tc_delta in tc_deltas:
+                                if not first_token_received:
+                                    first_token_received = True
+                                    result.time_to_first_token = time.monotonic() - start_time
 
-                        fn = tc_delta.get("function", {})
-                        if fn.get("name"):
-                            tc.function_name = fn["name"]
-                        if fn.get("arguments"):
-                            tc.arguments_json += fn["arguments"]
+                                idx = tc_delta.get("index", 0)
 
-                except (json.JSONDecodeError, KeyError, IndexError):
-                    continue
+                                if idx not in tool_calls_by_index:
+                                    tool_calls_by_index[idx] = ToolCall()
+
+                                tc = tool_calls_by_index[idx]
+
+                                if "id" in tc_delta and tc_delta["id"]:
+                                    tc.id = tc_delta["id"]
+
+                                fn = tc_delta.get("function", {})
+                                if fn.get("name"):
+                                    tc.function_name = fn["name"]
+                                if fn.get("arguments"):
+                                    tc.arguments_json += fn["arguments"]
+
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+
+            # Success — break out of retry loop
+            last_error = None
+            break
+
+        except Exception as exc:
+            if _is_retryable(exc) and attempt < MAX_STREAM_RETRIES:
+                last_error = exc
+                _on_retry(attempt + 1, exc, result.content)
+                continue
+            # Non-retryable or exhausted retries — re-raise
+            raise
 
     # Collect accumulated tool calls
     if tool_calls_by_index:
