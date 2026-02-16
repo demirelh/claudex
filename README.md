@@ -1,11 +1,12 @@
 # ClaudeX
 
-A **Claude Code-like CLI** that uses your **GitHub Copilot Business** subscription to access Claude Opus, Sonnet, GPT-5, Gemini, and more — all from your terminal.
+A **Claude Code-like CLI** that supports **GitHub Copilot Business** and **OpenAI API** — access Claude Opus, Sonnet, GPT-5, Gemini, and more from your terminal.
 
-No API keys to manage. No extra billing. Just your existing GitHub Copilot Business seat.
+Choose your backend: GitHub Copilot Business (no extra billing) or OpenAI API (direct access with your API key).
 
 ## Features
 
+- **Multiple backends** — GitHub Copilot Business or OpenAI API
 - **Interactive REPL** with streaming responses
 - **16 models** — Claude Opus/Sonnet/Haiku, GPT-5/4o, Gemini 2.5 Pro, Codex
 - **7 built-in tools** — bash, read/write/edit files, grep, directory listing, web fetch
@@ -23,7 +24,9 @@ No API keys to manage. No extra billing. Just your existing GitHub Copilot Busin
 ### Prerequisites
 
 - **Python 3.10+**
-- **GitHub Copilot Business** subscription (Individual works too)
+- **One of:**
+  - **GitHub Copilot Business** subscription (Individual works too), OR
+  - **OpenAI API key**
 - **Git** (to clone)
 
 ### Install
@@ -96,12 +99,54 @@ project › hello!
 ### CLI Options
 
 ```bash
-claudex                    # Default model (Claude Sonnet 4)
-claudex --model opus       # Start with Claude Opus 4.6
-claudex -m gpt-5           # Start with GPT-5
-claudex --list-models      # Show all available models
-claudex --version          # Show version
+claudex                       # Default model (Claude Sonnet 4), auto-select backend
+claudex --backend copilot     # Use GitHub Copilot Business backend
+claudex --backend openai      # Use OpenAI API backend
+claudex --model opus          # Start with Claude Opus 4.6
+claudex -m gpt-5              # Start with GPT-5
+claudex --list-models         # Show all available models
+claudex --version             # Show version
 ```
+
+### Backend Selection
+
+ClaudeX supports two backends:
+
+#### 1. GitHub Copilot Business (default)
+- Uses your existing Copilot subscription
+- No extra API keys needed
+- Access to all models: Claude (Opus, Sonnet, Haiku), GPT (5, 4o, 4.1), Gemini
+- Authentication via GitHub OAuth
+
+```bash
+claudex --backend copilot
+```
+
+#### 2. OpenAI API
+- Requires `OPENAI_API_KEY` environment variable
+- Direct OpenAI API access
+- **Only supports OpenAI models** (gpt-4o, gpt-5, gpt-5-mini, etc.)
+- Optional custom endpoint via `OPENAI_BASE_URL`
+
+```bash
+export OPENAI_API_KEY='sk-...'
+claudex --backend openai
+```
+
+**Auto-selection:** If you don't specify `--backend`:
+- If both backends are available (GitHub token + OPENAI_API_KEY), you'll be prompted to choose
+- If only one is available, it's selected automatically
+- If neither is available, GitHub auth flow starts
+
+**Environment variables:**
+- `OPENAI_API_KEY` — Your OpenAI API key
+- `OPENAI_BASE_URL` — Custom OpenAI-compatible endpoint (optional, defaults to `https://api.openai.com/v1`)
+
+**Model compatibility:**
+- Copilot backend: All models (Claude, GPT, Gemini)
+- OpenAI backend: Only OpenAI models (gpt-4o, gpt-5, etc.)
+
+Attempting to use an incompatible model (e.g., `opus` with OpenAI backend) will show a clear error message.
 
 ## Usage
 
