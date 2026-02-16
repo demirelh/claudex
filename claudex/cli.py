@@ -37,7 +37,9 @@ from prompt_toolkit.styles import Style as PTStyle
 
 from . import __version__
 from .auth import ensure_auth, get_copilot_token, clear_cached_token, CopilotToken
-from .client import stream_chat_with_tools, CopilotAPIError
+from .backends import Backend, BackendType, CopilotBackend, OpenAIBackend
+from .backends.copilot import CopilotAPIError
+from .backends.openai import OpenAIAPIError
 from .config import Config, CONFIG_DIR
 from .models import (
     MODELS,
@@ -46,6 +48,9 @@ from .models import (
     resolve_model,
     get_model_id,
     get_canonical_key,
+    is_model_compatible,
+    get_models_by_provider,
+    get_default_model_for_provider,
 )
 from .plan_mode import PlanState, PermissionMode
 from .tools import TOOL_DEFINITIONS, execute_tool, get_tools_for_mode
@@ -120,6 +125,7 @@ HELP_TEXT = """
 """
 
 # Max tool call iterations per message to prevent infinite loops
+# This is now configurable per backend in Config, but kept here as fallback
 MAX_TOOL_ITERATIONS = 25
 
 # ---------------------------------------------------------------------------
@@ -135,16 +141,24 @@ PT_STYLE = PTStyle.from_dict(
 class ClaudeXCLI:
     """Interactive CLI session."""
 
-    def __init__(self, model: Optional[str] = None, debug: bool = False):
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        debug: bool = False,
+        backend_type: Optional[BackendType] = None,
+    ):
         self.config = Config.load()
         self.messages: list[dict] = []
         self.current_model = model or self.config.default_model
         self.system_prompt = self.config.system_prompt
+        self.debug: bool = debug
+        self.backend_type: Optional[BackendType] = backend_type
+        self.backend: Optional[Backend] = None
+        # Legacy copilot fields (kept for compatibility)
         self.github_token: Optional[str] = None
         self.copilot_token: Optional[CopilotToken] = None
         self.tools_enabled: bool = True
         self.markdown_mode: bool = True
-        self.debug: bool = debug
         # Plan mode
         self.plan_state = PlanState(
             plan_dir=Path(self.config.plan_dir).expanduser()
@@ -155,11 +169,10 @@ class ClaudeXCLI:
         self.session_start: float = time.time()
 
     def _refresh_token_if_needed(self):
-        """Refresh Copilot session token if expired."""
-        if self.copilot_token and not self.copilot_token.is_expired:
-            return
-        assert self.github_token is not None
-        self.copilot_token = get_copilot_token(self.github_token, debug=self.debug)
+        """Refresh backend token if expired (Copilot only)."""
+        if isinstance(self.backend, CopilotBackend):
+            self.backend.refresh_token_if_needed()
+            self.copilot_token = self.backend.copilot_token
 
     def _build_messages(self) -> list[dict]:
         """Build the full message list including system prompt."""
@@ -168,6 +181,49 @@ class ClaudeXCLI:
             msgs.append({"role": "system", "content": self.system_prompt})
         msgs.extend(self.messages)
         return msgs
+
+    def _select_backend(self) -> BackendType:
+        """Select backend based on availability and user input.
+
+        Priority:
+        1. If only one backend is available, use it automatically
+        2. If both are available, ask user interactively
+        3. Default to Copilot if neither is available (will fail later with clear error)
+        """
+        import os
+        from .auth import get_github_token
+
+        has_copilot = get_github_token() is not None
+        has_openai = bool(os.environ.get("OPENAI_API_KEY"))
+
+        if has_copilot and has_openai:
+            # Both available — ask user
+            console.print()
+            console.print("  [bold]Multiple backends available:[/bold]")
+            console.print("    1. [cyan]copilot[/cyan] — GitHub Copilot Business (Claude, GPT, Gemini)")
+            console.print("    2. [cyan]openai[/cyan]  — OpenAI API (GPT models only)")
+            console.print()
+
+            while True:
+                try:
+                    choice = input("  Select backend (copilot/openai) [copilot]: ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    console.print()
+                    sys.exit(0)
+
+                if not choice or choice == "copilot" or choice == "1":
+                    return BackendType.COPILOT
+                elif choice == "openai" or choice == "2":
+                    return BackendType.OPENAI
+                else:
+                    console.print("  [warning]Invalid choice. Please enter 'copilot' or 'openai'.[/warning]")
+
+        elif has_openai:
+            console.print("  [dim]Using OpenAI backend (OPENAI_API_KEY found)[/dim]")
+            return BackendType.OPENAI
+        else:
+            # Default to Copilot (will authenticate or fail with clear error)
+            return BackendType.COPILOT
 
     def _handle_command(self, cmd: str) -> bool:
         """Handle slash commands. Returns True if handled."""
@@ -194,7 +250,7 @@ class ClaudeXCLI:
             # Block model switching in plan/exec modes
             if self.plan_state.mode != PermissionMode.NORMAL:
                 mode_name = self.plan_state.mode.value
-                locked = self.config.plan_model if self.plan_state.mode == PermissionMode.PLAN else self.config.exec_model
+                locked = self.config.get_plan_model(self.backend.backend_type if self.backend else None) if self.plan_state.mode == PermissionMode.PLAN else self.config.get_exec_model(self.backend.backend_type if self.backend else None)
                 locked_obj = resolve_model(locked)
                 locked_name = locked_obj.name if locked_obj else locked
                 console.print(
@@ -212,6 +268,16 @@ class ClaudeXCLI:
 
             resolved = resolve_model(arg)
             if resolved:
+                # Check backend compatibility
+                if self.backend and self.backend.backend_type == BackendType.OPENAI:
+                    if not is_model_compatible(arg, "OpenAI"):
+                        console.print(
+                            f"  [error]Model '{resolved.name}' is not available with OpenAI backend.[/error]\n"
+                            "  OpenAI backend only supports OpenAI models (gpt-4o, gpt-5, etc.).\n"
+                            "  Restart with --backend copilot for Claude/Gemini models."
+                        )
+                        return True
+
                 self.current_model = get_canonical_key(arg)
                 console.print(
                     f"  Switched to [model]{resolved.name}[/model] ({resolved.id})"
@@ -224,8 +290,16 @@ class ClaudeXCLI:
                 )
 
         elif command == "/models":
+            # Filter models by backend if using OpenAI
+            if self.backend and self.backend.backend_type == BackendType.OPENAI:
+                models_to_show = get_models_by_provider("OpenAI")
+                title = "Available Models (OpenAI Backend)"
+            else:
+                models_to_show = MODELS
+                title = "Available Models"
+
             table = Table(
-                title="Available Models",
+                title=title,
                 show_lines=False,
                 padding=(0, 2),
                 title_style="bold",
@@ -235,7 +309,7 @@ class ClaudeXCLI:
             table.add_column("Provider", style="dim")
             table.add_column("Description", style="dim")
 
-            for alias, model in MODELS.items():
+            for alias, model in models_to_show.items():
                 marker = " [green]●[/green]" if alias == self.current_model else ""
                 table.add_row(
                     alias + marker,
@@ -246,11 +320,19 @@ class ClaudeXCLI:
             console.print()
             console.print(table)
             console.print()
-            aliases_str = ", ".join(
-                f"[dim]{k}[/dim]→[cyan]{v}[/cyan]" for k, v in MODEL_ALIASES.items()
-            )
-            console.print(f"  Aliases: {aliases_str}")
-            console.print()
+
+            # Filter aliases that point to shown models
+            shown_keys = set(models_to_show.keys())
+            relevant_aliases = {
+                k: v for k, v in MODEL_ALIASES.items()
+                if v in shown_keys
+            }
+            if relevant_aliases:
+                aliases_str = ", ".join(
+                    f"[dim]{k}[/dim]→[cyan]{v}[/cyan]" for k, v in relevant_aliases.items()
+                )
+                console.print(f"  Aliases: {aliases_str}")
+                console.print()
 
         elif command == "/system":
             if not arg:
@@ -371,9 +453,10 @@ class ClaudeXCLI:
                 return True
 
             plan_path = self.plan_state.enter_plan()
-            plan_model_obj = resolve_model(self.config.plan_model)
+            plan_model = self.config.get_plan_model(self.backend.backend_type if self.backend else None)
+            plan_model_obj = resolve_model(plan_model)
             plan_model_name = (
-                plan_model_obj.name if plan_model_obj else self.config.plan_model
+                plan_model_obj.name if plan_model_obj else plan_model
             )
             console.print(
                 f"  ⏸ [warning]plan mode on[/warning] "
@@ -416,9 +499,10 @@ class ClaudeXCLI:
             console.print(f"  [error]{e}[/error]")
             return True
 
-        exec_model_obj = resolve_model(self.config.exec_model)
+        exec_model = self.config.get_exec_model(self.backend.backend_type if self.backend else None)
+        exec_model_obj = resolve_model(exec_model)
         exec_model_name = (
-            exec_model_obj.name if exec_model_obj else self.config.exec_model
+            exec_model_obj.name if exec_model_obj else exec_model
         )
         console.print(
             f"  ⏵ [success]executing approved plan[/success] "
@@ -472,7 +556,7 @@ class ClaudeXCLI:
             console.print(f"\n  [error]{e}[/error]")
             return
 
-        use_model = self.config.exec_model
+        use_model = self.config.get_exec_model(self.backend.backend_type if self.backend else None)
         model_id = get_model_id(use_model)
         model_obj = resolve_model(use_model)
         model_display = model_obj.name if model_obj else use_model
@@ -482,7 +566,10 @@ class ClaudeXCLI:
         msg_completion_tokens = 0
         msg_start = time.monotonic()
 
-        for iteration in range(MAX_TOOL_ITERATIONS):
+        # Get backend-specific max iterations
+        max_iterations = self.config.get_max_tool_iterations(self.backend.backend_type if self.backend else None)
+
+        for iteration in range(max_iterations):
             chunks_collected: list[str] = []
             first_chunk_received = False
             live = Live(
@@ -504,8 +591,7 @@ class ClaudeXCLI:
                     sys.stdout.flush()
 
             try:
-                result = await stream_chat_with_tools(
-                    token=self.copilot_token,
+                result = await self.backend.stream_chat_with_tools(
                     messages=self._build_messages(),
                     model=model_id,
                     max_tokens=self.config.max_tokens,
@@ -723,15 +809,15 @@ class ClaudeXCLI:
 
         # Mode-based model override (enforced, takes priority)
         if self.plan_state.mode == PermissionMode.PLAN:
-            use_model = self.config.plan_model
+            use_model = self.config.get_plan_model(self.backend.backend_type if self.backend else None)
             if override_model:
-                plan_obj = resolve_model(self.config.plan_model)
-                console.print(f"  [dim]Model locked to {plan_obj.name if plan_obj else self.config.plan_model} in plan mode[/dim]")
+                plan_obj = resolve_model(use_model)
+                console.print(f"  [dim]Model locked to {plan_obj.name if plan_obj else use_model} in plan mode[/dim]")
         elif self.plan_state.mode == PermissionMode.EXEC:
-            use_model = self.config.exec_model
+            use_model = self.config.get_exec_model(self.backend.backend_type if self.backend else None)
             if override_model:
-                exec_obj = resolve_model(self.config.exec_model)
-                console.print(f"  [dim]Model locked to {exec_obj.name if exec_obj else self.config.exec_model} in exec mode[/dim]")
+                exec_obj = resolve_model(use_model)
+                console.print(f"  [dim]Model locked to {exec_obj.name if exec_obj else use_model} in exec mode[/dim]")
 
         self.messages.append({"role": "user", "content": actual_input})
 
@@ -764,8 +850,11 @@ class ClaudeXCLI:
         msg_completion_tokens = 0
         msg_start = time.monotonic()
 
+        # Get backend-specific max iterations
+        max_iterations = self.config.get_max_tool_iterations(self.backend.backend_type if self.backend else None)
+
         # Tool call loop — the model may call tools multiple times
-        for iteration in range(MAX_TOOL_ITERATIONS):
+        for iteration in range(max_iterations):
 
             # --- Show thinking spinner while waiting for first token ---
             spinner_text = Text.assemble(
@@ -794,8 +883,7 @@ class ClaudeXCLI:
                     sys.stdout.flush()
 
             try:
-                result = await stream_chat_with_tools(
-                    token=self.copilot_token,
+                result = await self.backend.stream_chat_with_tools(
                     messages=self._build_messages(),
                     model=model_id,
                     max_tokens=self.config.max_tokens,
@@ -810,9 +898,10 @@ class ClaudeXCLI:
             except PermissionError as e:
                 live.stop()
                 console.print(f"\n  [error]{e}[/error]")
-                self.copilot_token = None
+                if isinstance(self.backend, CopilotBackend):
+                    self.copilot_token = None
                 return
-            except CopilotAPIError as e:
+            except (CopilotAPIError, OpenAIAPIError) as e:
                 live.stop()
                 console.print(f"\n  [error]{e}[/error]")
                 return
@@ -982,6 +1071,51 @@ class ClaudeXCLI:
 
     def run(self):
         """Main sync REPL loop."""
+        # --- Determine and initialize backend ---
+        if not self.backend_type:
+            # Auto-select backend based on availability
+            self.backend_type = self._select_backend()
+
+        # Initialize backend based on type
+        if self.backend_type == BackendType.COPILOT:
+            try:
+                self.github_token, self.copilot_token = ensure_auth(console, debug=self.debug)
+                self.backend = CopilotBackend(
+                    self.github_token, self.copilot_token, debug=self.debug
+                )
+            except SystemExit as e:
+                console.print(f"  [error]{e}[/error]")
+                return
+            except Exception as e:
+                console.print(f"  [error]Authentication failed: {e}[/error]")
+                return
+        elif self.backend_type == BackendType.OPENAI:
+            self.backend = OpenAIBackend()
+            if not self.backend.is_available():
+                console.print()
+                console.print(
+                    "  [error]OpenAI API key not found.[/error]\n"
+                    "  Set the OPENAI_API_KEY environment variable:\n"
+                    "    export OPENAI_API_KEY='your-api-key'\n"
+                )
+                return
+
+        # Validate model compatibility with backend
+        if self.backend.backend_type == BackendType.OPENAI:
+            if not is_model_compatible(self.current_model, "OpenAI"):
+                resolved = resolve_model(self.current_model)
+                model_name = resolved.name if resolved else self.current_model
+                # Auto-switch to a compatible OpenAI model
+                default_openai_model = get_default_model_for_provider("OpenAI")
+                self.current_model = default_openai_model
+                default_model_obj = resolve_model(default_openai_model)
+                console.print()
+                console.print(
+                    f"  [warning]Model '{model_name}' is not available with OpenAI backend.[/warning]\n"
+                    f"  [info]Automatically switched to {default_model_obj.name}.[/info]\n"
+                    "  [dim]Use --backend copilot for Claude/Gemini models.[/dim]\n"
+                )
+
         # --- Banner ---
         model = resolve_model(self.current_model)
         model_display = model.name if model else self.current_model
@@ -990,7 +1124,7 @@ class ClaudeXCLI:
         console.print(
             Panel(
                 f"[bold white]ClaudeX[/bold white]  [dim]v{__version__}[/dim]\n"
-                f"[dim]GitHub Copilot Business[/dim] · [model]{model_display}[/model]\n"
+                f"[dim]{self.backend.name}[/dim] · [model]{model_display}[/model]\n"
                 f"[dim]cwd: {os.getcwd()}[/dim]",
                 border_style="bright_blue",
                 padding=(0, 2),
@@ -1005,24 +1139,15 @@ class ClaudeXCLI:
             "Prefix @model to override.[/dim]\n"
         )
 
-        # --- Authenticate ---
-        try:
-            self.github_token, self.copilot_token = ensure_auth(console, debug=self.debug)
-        except SystemExit as e:
-            console.print(f"  [error]{e}[/error]")
-            return
-        except Exception as e:
-            console.print(f"  [error]Authentication failed: {e}[/error]")
-            return
-
+        # Show authentication status
         resolved = resolve_model(self.current_model)
         if resolved:
             console.print(
-                f"  [success]✓[/success] Authenticated — [model]{resolved.name}[/model]\n"
+                f"  [success]✓[/success] Ready — [model]{resolved.name}[/model]\n"
             )
         else:
             console.print(
-                f"  [success]✓[/success] Authenticated — [model]{self.current_model}[/model]\n"
+                f"  [success]✓[/success] Ready — [model]{self.current_model}[/model]\n"
             )
 
         # --- Multi-line key bindings ---
@@ -1111,14 +1236,23 @@ def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
         prog="claudex",
-        description="ClaudeX — CLI for GitHub Copilot Business models",
+        description="ClaudeX — CLI for GitHub Copilot Business and OpenAI models",
     )
     parser.add_argument(
         "-m",
         "--model",
         type=str,
         default=None,
-        help="Model to use (e.g. opus, sonnet, gpt-4o, o4-mini)",
+        help="Model to use (e.g. opus, sonnet, gpt-4o, gpt-5)",
+    )
+    parser.add_argument(
+        "--backend",
+        "--provider",
+        dest="backend",
+        type=str,
+        choices=["copilot", "openai"],
+        default=None,
+        help="Backend to use: copilot (GitHub Copilot Business) or openai (OpenAI API)",
     )
     parser.add_argument(
         "-l",
@@ -1168,7 +1302,15 @@ def main():
             console.print("  [dim]ClaudeX will use these on next start.[/dim]")
         return
 
-    cli = ClaudeXCLI(model=args.model, debug=args.debug)
+    # Parse backend type
+    backend_type = None
+    if args.backend:
+        if args.backend == "copilot":
+            backend_type = BackendType.COPILOT
+        elif args.backend == "openai":
+            backend_type = BackendType.OPENAI
+
+    cli = ClaudeXCLI(model=args.model, debug=args.debug, backend_type=backend_type)
     if args.plan:
         plan_path = cli.plan_state.enter_plan()
         console.print(f"  ⏸ [warning]plan mode on[/warning] ([model]Opus[/model])")

@@ -1,11 +1,12 @@
 # ClaudeX
 
-A **Claude Code-like CLI** that uses your **GitHub Copilot Business** subscription to access Claude Opus, Sonnet, GPT-5, Gemini, and more — all from your terminal.
+A **Claude Code-like CLI** that supports **GitHub Copilot Business** and **OpenAI API** — access Claude Opus, Sonnet, GPT-5, Gemini, and more from your terminal.
 
-No API keys to manage. No extra billing. Just your existing GitHub Copilot Business seat.
+Choose your backend: GitHub Copilot Business (no extra billing) or OpenAI API (direct access with your API key).
 
 ## Features
 
+- **Multiple backends** — GitHub Copilot Business or OpenAI API
 - **Interactive REPL** with streaming responses
 - **16 models** — Claude Opus/Sonnet/Haiku, GPT-5/4o, Gemini 2.5 Pro, Codex
 - **7 built-in tools** — bash, read/write/edit files, grep, directory listing, web fetch
@@ -16,14 +17,16 @@ No API keys to manage. No extra billing. Just your existing GitHub Copilot Busin
 - **Token tracking** — TTFT, total time, token count per message
 - **Thinking spinner** — animated indicator while waiting for response
 - **Session history** — persistent across sessions
-- **Plan Mode** — Opus plans, Sonnet executes, with approval gate (also via natural language)
+- **Plan Mode** — Backend-aware: Opus/Sonnet for Copilot, GPT-5/5-Mini for OpenAI, with approval gate
 
 ## Quick Start
 
 ### Prerequisites
 
 - **Python 3.10+**
-- **GitHub Copilot Business** subscription (Individual works too)
+- **One of:**
+  - **GitHub Copilot Business** subscription (Individual works too), OR
+  - **OpenAI API key**
 - **Git** (to clone)
 
 ### Install
@@ -96,12 +99,54 @@ project › hello!
 ### CLI Options
 
 ```bash
-claudex                    # Default model (Claude Sonnet 4)
-claudex --model opus       # Start with Claude Opus 4.6
-claudex -m gpt-5           # Start with GPT-5
-claudex --list-models      # Show all available models
-claudex --version          # Show version
+claudex                       # Default model (Claude Sonnet 4), auto-select backend
+claudex --backend copilot     # Use GitHub Copilot Business backend
+claudex --backend openai      # Use OpenAI API backend
+claudex --model opus          # Start with Claude Opus 4.6
+claudex -m gpt-5              # Start with GPT-5
+claudex --list-models         # Show all available models
+claudex --version             # Show version
 ```
+
+### Backend Selection
+
+ClaudeX supports two backends:
+
+#### 1. GitHub Copilot Business (default)
+- Uses your existing Copilot subscription
+- No extra API keys needed
+- Access to all models: Claude (Opus, Sonnet, Haiku), GPT (5, 4o, 4.1), Gemini
+- Authentication via GitHub OAuth
+
+```bash
+claudex --backend copilot
+```
+
+#### 2. OpenAI API
+- Requires `OPENAI_API_KEY` environment variable
+- Direct OpenAI API access
+- **Only supports OpenAI models** (gpt-4o, gpt-5, gpt-5-mini, etc.)
+- Optional custom endpoint via `OPENAI_BASE_URL`
+
+```bash
+export OPENAI_API_KEY='sk-...'
+claudex --backend openai
+```
+
+**Auto-selection:** If you don't specify `--backend`:
+- If both backends are available (GitHub token + OPENAI_API_KEY), you'll be prompted to choose
+- If only one is available, it's selected automatically
+- If neither is available, GitHub auth flow starts
+
+**Environment variables:**
+- `OPENAI_API_KEY` — Your OpenAI API key
+- `OPENAI_BASE_URL` — Custom OpenAI-compatible endpoint (optional, defaults to `https://api.openai.com/v1`)
+
+**Model compatibility:**
+- Copilot backend: All models (Claude, GPT, Gemini)
+- OpenAI backend: Only OpenAI models (gpt-4o, gpt-5, etc.)
+
+When using `--backend openai`, ClaudeX automatically switches to `gpt-4o` if the default or specified model is incompatible. Attempting to manually switch to an incompatible model (e.g., `/model opus`) will show an error message.
 
 ## Usage
 
@@ -170,7 +215,15 @@ Tools are **enabled by default**. Toggle with `/tools on` or `/tools off`.
 
 ### Plan Mode
 
-Plan Mode splits complex tasks into a planning phase (Opus) and an execution phase (Sonnet), with a mandatory approval gate in between.
+Plan Mode splits complex tasks into a planning phase and an execution phase, with a mandatory approval gate in between.
+
+**Default models (Copilot backend)**:
+- Planning: Claude Opus 4.6
+- Execution: Claude Sonnet 4
+
+**OpenAI backend**:
+- Planning: GPT-5
+- Execution: GPT-5 Mini
 
 **Workflow**: `NORMAL → /plan → PLAN → /approve → EXEC → done → NORMAL`
 
@@ -251,9 +304,25 @@ Settings are stored in `~/.config/claudex/config.json`:
   "system_prompt": null,
   "plan_model": "opus",
   "exec_model": "sonnet",
-  "plan_dir": "~/.config/claudex/plans"
+  "plan_model_openai": "gpt-5",
+  "exec_model_openai": "gpt-5-mini",
+  "plan_dir": "~/.config/claudex/plans",
+  "max_tool_iterations": 25,
+  "max_tool_iterations_openai": 50
 }
 ```
+
+**Backend-specific plan/exec models**:
+- `plan_model` / `exec_model`: Used with Copilot backend (default: opus/sonnet)
+- `plan_model_openai` / `exec_model_openai`: Used with OpenAI backend (default: gpt-5/gpt-5-mini)
+
+**Tool iteration limits**:
+- `max_tool_iterations`: Maximum tool call iterations for Copilot backend (default: 25)
+- `max_tool_iterations_openai`: Maximum tool call iterations for OpenAI backend (default: 50)
+
+Different models have different tool-calling behaviors. Claude models (Opus/Sonnet) tend to be more efficient with fewer iterations, while GPT models may make more granular tool calls. The higher limit for OpenAI backend allows GPT-5 to complete complex tasks without hitting the iteration limit.
+
+**Note**: GPT-5 models use OpenAI's latest API parameters (`max_completion_tokens` instead of `max_tokens`) and only support the default temperature value (1.0). The temperature parameter is automatically omitted for GPT-5 models.
 
 Edit via slash commands (`/model`, `/system`) and persist with `/save`.
 
