@@ -47,7 +47,8 @@ from .models import (
     get_model_id,
     get_canonical_key,
 )
-from .tools import TOOL_DEFINITIONS, execute_tool
+from .plan_mode import PlanState, PermissionMode
+from .tools import TOOL_DEFINITIONS, execute_tool, get_tools_for_mode
 
 # ---------------------------------------------------------------------------
 # Rich console theme
@@ -101,11 +102,21 @@ HELP_TEXT = """
   • [dim]grep_search[/dim]      — Search files with regex
   • [dim]web_fetch[/dim]        — Fetch URLs (HTTP/HTTPS)
 
+[bold]Plan Mode:[/bold]
+  [command]/plan[/command]           Enter plan mode (Opus, read-only tools)
+  [command]/plan show[/command]      Show current plan content
+  [command]/plan path[/command]      Show plan file path
+  [command]/plan stop[/command]      Exit plan/exec mode → normal
+  [command]/approve[/command]        Approve plan → execute with Sonnet
+  [command]/deny[/command] [msg]     Deny plan with feedback → revise
+
 [bold]Tips:[/bold]
   • The model can use tools automatically (files, shell, web)
   • Use /tools to disable tools for plain chat mode
   • Conversation history is kept for the session (/clear to reset)
   • Token usage is shown after each response
+  • In plan mode, model is locked to Opus; only read-only tools allowed
+  • After /approve, execution uses Sonnet with all tools
 """
 
 # Max tool call iterations per message to prevent infinite loops
@@ -134,6 +145,10 @@ class ClaudeXCLI:
         self.tools_enabled: bool = True
         self.markdown_mode: bool = True
         self.debug: bool = debug
+        # Plan mode
+        self.plan_state = PlanState(
+            plan_dir=Path(self.config.plan_dir).expanduser()
+        )
         # Session stats
         self.total_prompt_tokens: int = 0
         self.total_completion_tokens: int = 0
@@ -166,7 +181,28 @@ class ClaudeXCLI:
         elif command == "/help":
             console.print(HELP_TEXT)
 
+        elif command == "/plan":
+            return self._handle_plan_command(arg)
+
+        elif command == "/approve":
+            return self._handle_approve_command()
+
+        elif command == "/deny":
+            return self._handle_deny_command(arg)
+
         elif command == "/model":
+            # Block model switching in plan/exec modes
+            if self.plan_state.mode != PermissionMode.NORMAL:
+                mode_name = self.plan_state.mode.value
+                locked = self.config.plan_model if self.plan_state.mode == PermissionMode.PLAN else self.config.exec_model
+                locked_obj = resolve_model(locked)
+                locked_name = locked_obj.name if locked_obj else locked
+                console.print(
+                    f"  [warning]Model locked to {locked_name} in {mode_name} mode.[/warning]"
+                )
+                console.print("  [dim]Use /plan stop to return to normal mode.[/dim]")
+                return True
+
             if not arg:
                 model = resolve_model(self.current_model)
                 name = model.name if model else self.current_model
@@ -291,6 +327,288 @@ class ClaudeXCLI:
 
         return True
 
+    # ------------------------------------------------------------------
+    # Plan mode commands
+    # ------------------------------------------------------------------
+
+    def _handle_plan_command(self, arg: str) -> bool:
+        """Handle /plan and its subcommands."""
+        sub = arg.lower().strip()
+
+        if sub == "show":
+            content = self.plan_state.get_plan_content()
+            if content:
+                console.print()
+                self._render_response(content)
+                console.print()
+            else:
+                console.print("  [dim]No plan file yet.[/dim]")
+
+        elif sub == "path":
+            if self.plan_state.plan_path:
+                console.print(f"  [dim]{self.plan_state.plan_path}[/dim]")
+            else:
+                console.print("  [dim]No active plan.[/dim]")
+
+        elif sub == "stop":
+            if self.plan_state.mode == PermissionMode.NORMAL:
+                console.print("  [dim]Already in normal mode.[/dim]")
+            else:
+                prev = self.plan_state.mode.value
+                self.plan_state.stop()
+                console.print(
+                    f"  [success]✓[/success] Exited {prev} mode → normal"
+                )
+
+        else:
+            # Enter plan mode
+            if self.plan_state.mode == PermissionMode.PLAN:
+                console.print("  [warning]Already in plan mode.[/warning]")
+                if self.plan_state.plan_path:
+                    console.print(
+                        f"  [dim]Plan file: {self.plan_state.plan_path}[/dim]"
+                    )
+                return True
+
+            plan_path = self.plan_state.enter_plan()
+            plan_model_obj = resolve_model(self.config.plan_model)
+            plan_model_name = (
+                plan_model_obj.name if plan_model_obj else self.config.plan_model
+            )
+            console.print(
+                f"  ⏸ [warning]plan mode on[/warning] "
+                f"([model]{plan_model_name}[/model])"
+            )
+            console.print(f"  [dim]Plan file: {plan_path}[/dim]")
+            console.print(
+                "  [dim]Read-only tools only. Write the plan, "
+                "then /approve or /deny.[/dim]"
+            )
+
+            # Inject a system-level instruction so the model knows it's planning
+            plan_instruction = (
+                f"You are now in PLAN MODE. Your task is to inspect the codebase "
+                f"using read-only tools (read_file, list_directory, grep_search, "
+                f"web_fetch) and produce a detailed implementation plan. "
+                f"Write the plan to: {plan_path}\n"
+                f"Do NOT implement anything — only plan. "
+                f"When the plan is complete, tell the user to type /approve or /deny."
+            )
+            self.messages.append(
+                {"role": "system", "content": plan_instruction}
+            )
+
+            # If user provided a task after /plan, send it
+            if arg and sub not in ("show", "path", "stop"):
+                asyncio.run(self._send_message(arg))
+
+        return True
+
+    def _handle_approve_command(self) -> bool:
+        """Handle /approve — approve plan and start execution."""
+        if self.plan_state.mode != PermissionMode.PLAN:
+            console.print("  [warning]Not in plan mode. Use /plan first.[/warning]")
+            return True
+
+        try:
+            plan_content = self.plan_state.approve()
+        except ValueError as e:
+            console.print(f"  [error]{e}[/error]")
+            return True
+
+        exec_model_obj = resolve_model(self.config.exec_model)
+        exec_model_name = (
+            exec_model_obj.name if exec_model_obj else self.config.exec_model
+        )
+        console.print(
+            f"  ⏵ [success]executing approved plan[/success] "
+            f"([model]{exec_model_name}[/model])"
+        )
+
+        # Inject approved plan as context + execution instruction
+        exec_instruction = (
+            f"The user has APPROVED the following plan. You are now in "
+            f"EXECUTION MODE. Implement the plan step by step using all "
+            f"available tools (bash, read_file, write_file, edit_file, etc.).\n\n"
+            f"--- APPROVED PLAN ---\n{plan_content}\n--- END PLAN ---\n\n"
+            f"Execute now. Be thorough and complete each step."
+        )
+        self.messages.append({"role": "user", "content": exec_instruction})
+
+        # Auto-trigger execution
+        asyncio.run(self._send_message_exec())
+
+        return True
+
+    def _handle_deny_command(self, feedback: str) -> bool:
+        """Handle /deny — deny plan and request revision."""
+        if self.plan_state.mode != PermissionMode.PLAN:
+            console.print("  [warning]Not in plan mode. Use /plan first.[/warning]")
+            return True
+
+        self.plan_state.deny()
+        feedback = feedback or "Please revise the plan."
+
+        console.print("  ⏸ [warning]plan denied — revising[/warning]")
+        console.print(f"  [dim]Feedback: {feedback}[/dim]")
+
+        deny_msg = (
+            f"The plan was DENIED by the user. Feedback: {feedback}\n"
+            f"Please revise the plan at {self.plan_state.plan_path} "
+            f"and address the feedback. Stay in plan mode."
+        )
+        self.messages.append({"role": "user", "content": deny_msg})
+        asyncio.run(self._send_message(deny_msg))
+
+        return True
+
+    async def _send_message_exec(self):
+        """Send the execution trigger message (internal, for /approve)."""
+        # This reuses _send_message logic but skips the user input append
+        # since we already appended the exec instruction
+        try:
+            self._refresh_token_if_needed()
+        except (SystemExit, Exception) as e:
+            console.print(f"\n  [error]{e}[/error]")
+            return
+
+        use_model = self.config.exec_model
+        model_id = get_model_id(use_model)
+        model_obj = resolve_model(use_model)
+        model_display = model_obj.name if model_obj else use_model
+        tools = get_tools_for_mode(self.plan_state.mode.value) if self.tools_enabled else None
+
+        msg_prompt_tokens = 0
+        msg_completion_tokens = 0
+        msg_start = time.monotonic()
+
+        for iteration in range(MAX_TOOL_ITERATIONS):
+            chunks_collected: list[str] = []
+            first_chunk_received = False
+            live = Live(
+                Spinner("dots", text=f"  [dim]Executing ({model_display})...[/dim]"),
+                console=console,
+                refresh_per_second=12,
+                transient=True,
+            )
+            live.start()
+
+            def on_chunk(chunk: str):
+                nonlocal first_chunk_received
+                if not first_chunk_received:
+                    first_chunk_received = True
+                    live.stop()
+                chunks_collected.append(chunk)
+                if not self.markdown_mode:
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
+
+            try:
+                result = await stream_chat_with_tools(
+                    token=self.copilot_token,
+                    messages=self._build_messages(),
+                    model=model_id,
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature,
+                    tools=tools,
+                    on_content_chunk=on_chunk,
+                )
+            except Exception as e:
+                live.stop()
+                console.print(f"\n  [error]Error: {e}[/error]")
+                return
+            finally:
+                if live.is_started:
+                    live.stop()
+
+            msg_prompt_tokens += result.prompt_tokens
+            msg_completion_tokens += result.completion_tokens
+
+            if not result.has_tool_calls:
+                if result.content:
+                    if self.markdown_mode:
+                        console.print()
+                        self._render_response(result.content)
+                    else:
+                        print()
+                    self.messages.append({"role": "assistant", "content": result.content})
+
+                self.total_prompt_tokens += msg_prompt_tokens
+                self.total_completion_tokens += msg_completion_tokens
+                elapsed = time.monotonic() - msg_start
+                stats = f"{elapsed:.1f}s total"
+                if msg_prompt_tokens or msg_completion_tokens:
+                    stats += f" · {msg_prompt_tokens + msg_completion_tokens:,} tokens"
+                console.print(f"  [dim]{stats}[/dim]")
+                console.print()
+
+                # Execution done → back to normal
+                self.plan_state.finish_exec()
+                console.print("  [success]✓[/success] Execution complete → normal mode")
+                console.print()
+                return
+
+            # Tool calls — same logic as _send_message
+            if result.content:
+                if self.markdown_mode:
+                    console.print()
+                    self._render_response(result.content)
+                else:
+                    print()
+
+            assistant_msg: dict = {
+                "role": "assistant",
+                "content": result.content or None,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function_name,
+                            "arguments": tc.arguments_json,
+                        },
+                    }
+                    for tc in result.tool_calls
+                ],
+            }
+            self.messages.append(assistant_msg)
+
+            for tc in result.tool_calls:
+                try:
+                    args = json.loads(tc.arguments_json) if tc.arguments_json else {}
+                except json.JSONDecodeError:
+                    args = {}
+
+                args_preview = ", ".join(f"{k}={repr(v)[:60]}" for k, v in args.items())
+                console.print()
+                console.print(f"  [info]⚡ {tc.function_name}[/info]  [dim]{args_preview}[/dim]")
+
+                tool_result = execute_tool(tc.function_name, args, console)
+
+                preview_lines = tool_result.split("\n")
+                if len(preview_lines) > 8:
+                    preview = "\n".join(preview_lines[:8]) + f"\n... ({len(preview_lines) - 8} more lines)"
+                else:
+                    preview = tool_result
+                if len(preview) > 500:
+                    preview = preview[:500] + "..."
+                console.print(Panel(
+                    Text(preview, style="dim"),
+                    border_style="dim",
+                    padding=(0, 1),
+                    expand=False,
+                ))
+
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": tool_result,
+                })
+
+        console.print("  [warning]Max tool iterations reached[/warning]")
+        self.plan_state.finish_exec()
+        console.print("  [success]✓[/success] Execution complete → normal mode")
+
     def _parse_model_prefix(self, user_input: str) -> tuple[Optional[str], str]:
         """Parse model override from input.
 
@@ -345,6 +663,18 @@ class ClaudeXCLI:
         override_model, actual_input = self._parse_model_prefix(user_input)
         use_model = override_model or self.current_model
 
+        # Mode-based model override (enforced, takes priority)
+        if self.plan_state.mode == PermissionMode.PLAN:
+            use_model = self.config.plan_model
+            if override_model:
+                plan_obj = resolve_model(self.config.plan_model)
+                console.print(f"  [dim]Model locked to {plan_obj.name if plan_obj else self.config.plan_model} in plan mode[/dim]")
+        elif self.plan_state.mode == PermissionMode.EXEC:
+            use_model = self.config.exec_model
+            if override_model:
+                exec_obj = resolve_model(self.config.exec_model)
+                console.print(f"  [dim]Model locked to {exec_obj.name if exec_obj else self.config.exec_model} in exec mode[/dim]")
+
         self.messages.append({"role": "user", "content": actual_input})
 
         try:
@@ -361,7 +691,12 @@ class ClaudeXCLI:
         model_id = get_model_id(use_model)
         model_obj = resolve_model(use_model)
         model_display = model_obj.name if model_obj else use_model
-        tools = TOOL_DEFINITIONS if self.tools_enabled else None
+
+        # Mode-aware tool selection
+        if not self.tools_enabled:
+            tools = None
+        else:
+            tools = get_tools_for_mode(self.plan_state.mode.value)
 
         if override_model:
             console.print(f"  [dim]Using [model]{model_display}[/model] for this message[/dim]")
@@ -504,6 +839,22 @@ class ClaudeXCLI:
                     f"  [dim]{args_preview}[/dim]"
                 )
 
+                # Plan mode: enforce tool permissions
+                allowed, reason = self.plan_state.is_tool_allowed(
+                    tc.function_name, args
+                )
+                if not allowed:
+                    console.print(f"  [error]{reason}[/error]")
+                    tool_result = f"BLOCKED: {reason}"
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": tool_result,
+                        }
+                    )
+                    continue
+
                 tool_result = execute_tool(tc.function_name, args, console)
 
                 # Show truncated result in panel
@@ -534,10 +885,20 @@ class ClaudeXCLI:
         console.print("  [warning]Max tool iterations reached[/warning]")
 
     def _build_prompt_fragments(self):
-        """Build the prompt showing CWD and model."""
+        """Build the prompt showing CWD, mode indicator, and model."""
         cwd = os.path.basename(os.getcwd()) or "/"
-        model_obj = resolve_model(self.current_model)
-        model_short = model_obj.name if model_obj else self.current_model
+        if self.plan_state.mode == PermissionMode.PLAN:
+            return [
+                ("class:cwd", f"{cwd}"),
+                ("class:plan", " ⏸plan"),
+                ("class:prompt", " › "),
+            ]
+        elif self.plan_state.mode == PermissionMode.EXEC:
+            return [
+                ("class:cwd", f"{cwd}"),
+                ("class:exec", " ⏵exec"),
+                ("class:prompt", " › "),
+            ]
         return [
             ("class:cwd", f"{cwd}"),
             ("class:prompt", " › "),
@@ -601,6 +962,8 @@ class ClaudeXCLI:
         pt_style = PTStyle.from_dict({
             "prompt": "#00cc99 bold",
             "cwd": "#888888",
+            "plan": "#ff8800 bold",
+            "exec": "#00ccff bold",
         })
 
         session = PromptSession(
@@ -696,6 +1059,11 @@ def main():
         action="store_true",
         help="Show diagnostic info (account, token, API responses)",
     )
+    parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Start in plan mode (Opus for planning, Sonnet for execution)",
+    )
 
     args = parser.parse_args()
 
@@ -719,6 +1087,10 @@ def main():
         return
 
     cli = ClaudeXCLI(model=args.model, debug=args.debug)
+    if args.plan:
+        plan_path = cli.plan_state.enter_plan()
+        console.print(f"  ⏸ [warning]plan mode on[/warning] ([model]Opus[/model])")
+        console.print(f"  [dim]Plan file: {plan_path}[/dim]")
     try:
         cli.run()
     except KeyboardInterrupt:

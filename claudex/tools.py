@@ -516,3 +516,33 @@ def _run_edit_file(args: dict, console=None) -> str:
 
     except Exception as e:
         return f"Error editing file: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Mode-aware tool filtering
+# ---------------------------------------------------------------------------
+
+def get_tools_for_mode(mode: str) -> list[dict]:
+    """Return tool definitions filtered for the given permission mode.
+
+    In PLAN mode, only read-only tools + write/edit (for plan file) are
+    sent to the model. The actual path check happens at execution time.
+    In NORMAL and EXEC modes, all tools are available.
+
+    Args:
+        mode: One of "normal", "plan", "exec".
+
+    Returns:
+        Filtered list of tool definitions.
+    """
+    if mode in ("normal", "exec"):
+        return TOOL_DEFINITIONS
+
+    # plan mode — read-only + write_file/edit_file (path-checked at runtime)
+    from .plan_mode import PLAN_READONLY_TOOLS, PLAN_WRITE_TOOLS
+
+    allowed = PLAN_READONLY_TOOLS | PLAN_WRITE_TOOLS
+    return [
+        t for t in TOOL_DEFINITIONS
+        if t["function"]["name"] in allowed
+    ]

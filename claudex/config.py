@@ -20,6 +20,10 @@ class Config:
     temperature: float = 0.0
     max_tokens: int = 16384
     system_prompt: Optional[str] = None
+    # Plan mode settings
+    plan_model: str = "opus"
+    exec_model: str = "sonnet"
+    plan_dir: str = "~/.config/claudex/plans"
 
     def save(self):
         """Persist config to disk."""

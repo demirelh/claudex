@@ -16,6 +16,7 @@ No API keys to manage. No extra billing. Just your existing GitHub Copilot Busin
 - **Token tracking** — TTFT, total time, token count per message
 - **Thinking spinner** — animated indicator while waiting for response
 - **Session history** — persistent across sessions
+- **Plan Mode** — Opus plans, Sonnet executes, with approval gate
 
 ## Quick Start
 
@@ -119,6 +120,11 @@ claudex --version          # Show version
 | `/markdown` | Toggle Markdown rendering |
 | `/save` | Save current config to disk |
 | `/logout` | Clear cached GitHub token |
+| `/plan [task]` | Enter plan mode (Opus inspects + writes plan) |
+| `/plan show` | Display current plan |
+| `/plan stop` | Exit plan/exec mode → normal |
+| `/approve` | Approve plan → start execution (Sonnet) |
+| `/deny [feedback]` | Deny plan, request revision |
 | `/help` | Show all commands |
 | `/quit` | Exit |
 
@@ -162,6 +168,42 @@ ClaudeX can execute actions on your machine via function calling:
 
 Tools are **enabled by default**. Toggle with `/tools on` or `/tools off`.
 
+### Plan Mode
+
+Plan Mode splits complex tasks into a planning phase (Opus) and an execution phase (Sonnet), with a mandatory approval gate in between.
+
+**Workflow**: `NORMAL → /plan → PLAN → /approve → EXEC → done → NORMAL`
+
+```
+project › /plan refactor the auth module
+  ⏸ plan mode on (Claude Opus 4.6)
+  Plan file: ~/.config/claudex/plans/20250101-120000-plan.md
+  Read-only tools only. Write the plan, then /approve or /deny.
+
+  [Opus inspects codebase with read-only tools, writes plan...]
+
+project ⏸plan › /plan show
+  # Refactoring Plan
+  1. Extract token refresh into separate class...
+
+project ⏸plan › /approve
+  ⏵ executing approved plan (Claude Sonnet 4)
+  [Sonnet implements each step with full tool access...]
+  ✓ Execution complete → normal mode
+```
+
+**Rules**:
+- **Plan phase**: Model locked to Opus. Only read-only tools (`read_file`, `list_directory`, `grep_search`, `web_fetch`) + writing to the plan file.
+- **Exec phase**: Model locked to Sonnet. All tools available.
+- **`/deny [feedback]`**: Rejects the plan and sends feedback to Opus for revision.
+- **`/plan stop`**: Force-exit any mode back to normal.
+- **`@model` and `/model` are locked** during plan/exec modes.
+
+Start with `--plan` flag to enter plan mode immediately:
+```bash
+claudex --plan
+```
+
 ## Available Models
 
 All models accessed via your GitHub Copilot Business subscription — no extra API keys:
@@ -192,7 +234,10 @@ Settings are stored in `~/.config/claudex/config.json`:
   "default_model": "sonnet",
   "temperature": 0.7,
   "max_tokens": 8096,
-  "system_prompt": null
+  "system_prompt": null,
+  "plan_model": "opus",
+  "exec_model": "sonnet",
+  "plan_dir": "~/.config/claudex/plans"
 }
 ```
 
@@ -210,6 +255,7 @@ claudex/
 │   ├── cli.py                 # Interactive REPL
 │   ├── config.py              # User config persistence
 │   ├── models.py              # Model definitions + aliases
+│   ├── plan_mode.py           # Plan Mode state machine
 │   └── tools.py               # Tool definitions + execution
 ├── pyproject.toml             # Package config (pip install -e .)
 ├── config/                    # Gateway config (optional)
