@@ -28,7 +28,7 @@ from prompt_toolkit.styles import Style as PTStyle
 
 from . import __version__
 from .auth import ensure_auth, get_copilot_token, clear_cached_token, CopilotToken
-from .client import stream_chat, CopilotAPIError
+from .client import stream_chat_with_tools, CopilotAPIError
 from .config import Config, CONFIG_DIR
 from .models import (
     MODELS,
@@ -38,6 +38,7 @@ from .models import (
     get_model_id,
     get_canonical_key,
 )
+from .tools import TOOL_DEFINITIONS, execute_tool
 
 # ---------------------------------------------------------------------------
 # Rich console theme
@@ -61,21 +62,34 @@ console = Console(theme=theme)
 # ---------------------------------------------------------------------------
 HELP_TEXT = """
 [bold]Commands:[/bold]
-  [command]/model[/command] <name>    Switch model (e.g. opus, sonnet, gpt-4o, o4-mini)
+  [command]/model[/command] <name>    Switch model (e.g. opus, sonnet, gpt-4o)
   [command]/models[/command]         List all available models
   [command]/system[/command] <msg>   Set system prompt for this session
   [command]/clear[/command]          Clear conversation history
+  [command]/tools[/command]          Toggle tool use on/off
   [command]/config[/command]         Show current configuration
   [command]/save[/command]           Save current settings as defaults
   [command]/logout[/command]         Clear cached GitHub token
   [command]/help[/command]           Show this help
   [command]/quit[/command]           Exit  [dim](or Ctrl+D / Ctrl+C)[/dim]
 
+[bold]Tools (enabled by default):[/bold]
+  • [dim]bash[/dim]           — Run shell commands
+  • [dim]read_file[/dim]      — Read file contents
+  • [dim]write_file[/dim]     — Create/overwrite files
+  • [dim]list_directory[/dim]  — List directory contents
+  • [dim]web_fetch[/dim]      — Fetch URLs (HTTP/HTTPS)
+
 [bold]Tips:[/bold]
+  • The model can use tools automatically when needed
+  • Use /tools to disable tools for plain chat mode
   • Conversation history is kept for the session (use /clear to reset)
   • Copilot tokens auto-refresh when they expire (~30 min)
   • Set GITHUB_TOKEN env var to skip interactive login
 """
+
+# Max tool call iterations per message to prevent infinite loops
+MAX_TOOL_ITERATIONS = 25
 
 # ---------------------------------------------------------------------------
 # Prompt toolkit style
@@ -97,6 +111,7 @@ class ClaudeXCLI:
         self.system_prompt = self.config.system_prompt
         self.github_token: Optional[str] = None
         self.copilot_token: Optional[CopilotToken] = None
+        self.tools_enabled: bool = True
 
     def _refresh_token_if_needed(self):
         """Refresh Copilot session token if expired."""
@@ -194,12 +209,19 @@ class ClaudeXCLI:
             self.messages.clear()
             console.print("  Conversation cleared.")
 
+        elif command == "/tools":
+            self.tools_enabled = not self.tools_enabled
+            state = "[success]enabled[/success]" if self.tools_enabled else "[warning]disabled[/warning]"
+            console.print(f"  Tools: {state}")
+
         elif command == "/config":
             model = resolve_model(self.current_model)
             model_name = model.name if model else self.current_model
             console.print(f"  Model:       [model]{model_name}[/model]")
             console.print(f"  Temperature: {self.config.temperature}")
             console.print(f"  Max tokens:  {self.config.max_tokens}")
+            tools_state = "[success]on[/success]" if self.tools_enabled else "[warning]off[/warning]"
+            console.print(f"  Tools:       {tools_state}")
             sp = self.system_prompt or "[dim](none)[/dim]"
             console.print(f"  System:      {sp[:80]}")
 
@@ -222,7 +244,7 @@ class ClaudeXCLI:
         return True
 
     async def _send_message(self, user_input: str):
-        """Send a message and stream the response."""
+        """Send a message and stream the response, handling tool calls."""
         self.messages.append({"role": "user", "content": user_input})
 
         try:
@@ -237,48 +259,106 @@ class ClaudeXCLI:
             return
 
         model_id = get_model_id(self.current_model)
-        full_response: list[str] = []
+        tools = TOOL_DEFINITIONS if self.tools_enabled else None
 
-        console.print()
-        try:
-            async for chunk in stream_chat(
-                token=self.copilot_token,
-                messages=self._build_messages(),
-                model=model_id,
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature,
-            ):
-                sys.stdout.write(chunk)
-                sys.stdout.flush()
-                full_response.append(chunk)
+        # Tool call loop — the model may call tools multiple times
+        for iteration in range(MAX_TOOL_ITERATIONS):
+            console.print()
 
-        except KeyboardInterrupt:
-            console.print("\n  [warning]Response cancelled[/warning]")
+            try:
+                result = await stream_chat_with_tools(
+                    token=self.copilot_token,
+                    messages=self._build_messages(),
+                    model=model_id,
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature,
+                    tools=tools,
+                    on_content_chunk=lambda chunk: (
+                        sys.stdout.write(chunk), sys.stdout.flush()
+                    ),
+                )
+            except KeyboardInterrupt:
+                console.print("\n  [warning]Response cancelled[/warning]")
+                return
+            except PermissionError as e:
+                console.print(f"\n  [error]{e}[/error]")
+                self.copilot_token = None
+                return
+            except CopilotAPIError as e:
+                console.print(f"\n  [error]{e}[/error]")
+                return
+            except Exception as e:
+                console.print(f"\n  [error]Error: {e}[/error]")
+                return
 
-        except PermissionError as e:
-            console.print(f"\n  [error]{e}[/error]")
-            # Invalidate token so it refreshes on next try
-            self.copilot_token = None
-            self.messages.pop()
-            return
+            # --- Text response (no tool calls) → done ---
+            if not result.has_tool_calls:
+                if result.content:
+                    print()  # Newline after streamed text
+                    self.messages.append(
+                        {"role": "assistant", "content": result.content}
+                    )
+                console.print()
+                return
 
-        except CopilotAPIError as e:
-            console.print(f"\n  [error]{e}[/error]")
-            self.messages.pop()
-            return
+            # --- Tool calls ---
+            if result.content:
+                print()
 
-        except Exception as e:
-            console.print(f"\n  [error]Error: {e}[/error]")
-            self.messages.pop()
-            return
+            # Build assistant message with tool_calls
+            import json as _json
 
-        response_text = "".join(full_response)
-        if response_text:
-            print()  # Newline after streamed text
-            self.messages.append(
-                {"role": "assistant", "content": response_text}
-            )
-        console.print()
+            assistant_msg: dict = {
+                "role": "assistant",
+                "content": result.content or None,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function_name,
+                            "arguments": tc.arguments_json,
+                        },
+                    }
+                    for tc in result.tool_calls
+                ],
+            }
+            self.messages.append(assistant_msg)
+
+            # Execute each tool call
+            for tc in result.tool_calls:
+                try:
+                    args = _json.loads(tc.arguments_json) if tc.arguments_json else {}
+                except _json.JSONDecodeError:
+                    args = {}
+
+                # Display tool invocation
+                args_preview = ", ".join(
+                    f"{k}={repr(v)[:60]}" for k, v in args.items()
+                )
+                console.print(
+                    f"  [info]⚡ {tc.function_name}[/info]({args_preview})"
+                )
+
+                tool_result = execute_tool(tc.function_name, args, console)
+
+                # Show truncated result
+                preview = tool_result[:200].replace("\n", " ")
+                if len(tool_result) > 200:
+                    preview += "..."
+                console.print(f"  [dim]→ {preview}[/dim]")
+
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": tool_result,
+                    }
+                )
+
+            # Loop: send tool results back to model
+
+        console.print("  [warning]Max tool iterations reached[/warning]")
 
     def run(self):
         """Main sync REPL loop."""
