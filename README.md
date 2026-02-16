@@ -1,357 +1,241 @@
 # ClaudeX
 
-Enterprise AI gateway that routes LLM requests through [GitHub Models API](https://docs.github.com/en/github-models), enabling centralized billing via GitHub Enterprise.
+A **Claude Code-like CLI** that uses your **GitHub Copilot Business** subscription to access Claude Opus, Sonnet, GPT-5, Gemini, and more — all from your terminal.
 
-Built on [LiteLLM Proxy](https://github.com/BerriAI/litellm) with PII masking, rate limiting, team-based API keys, and full audit logging.
+No API keys to manage. No extra billing. Just your existing GitHub Copilot Business seat.
 
-## Architecture
+## Features
 
-```mermaid
-flowchart TB
-    subgraph clients["Developer Workstation"]
-        claudex["ClaudeX CLI"]
-        vscode["VS Code / Cursor"]
-        sdk["OpenAI SDK / curl"]
-    end
-
-    subgraph gateway["Internal Network (Docker / K8s)"]
-        direction TB
-        subgraph litellm["LiteLLM Proxy :4000"]
-            direction LR
-            auth["Auth\n+ Virtual Keys\n+ Rate Limits"]
-            format["Format Translation\nAnthropic ↔ OpenAI"]
-            guardrails["Guardrails\n+ PII Masking"]
-            cache["Response Cache"]
-        end
-
-        subgraph backing["Backing Services"]
-            direction LR
-            postgres[("PostgreSQL\nKeys, Budgets,\nAudit Logs")]
-            redis[("Redis\nCache +\nRate Limits")]
-        end
-
-        subgraph presidio["Presidio PII Engine"]
-            direction LR
-            analyzer["Analyzer :3000\nDetect PII"]
-            anonymizer["Anonymizer :3000\nMask PII"]
-        end
-    end
-
-    subgraph github["GitHub Cloud"]
-        models["GitHub Models API\nmodels.github.ai/inference"]
-        billing["GitHub Enterprise\nBilling"]
-    end
-
-    subgraph mcp["Code Context (MCP)"]
-        ghserver["GitHub MCP Server\n77 tools: repos, PRs,\nissues, search"]
-    end
-
-    claudex -- "ANTHROPIC_BASE_URL\n/v1/messages" --> litellm
-    vscode -- "/v1/chat/completions" --> litellm
-    sdk -- "/v1/chat/completions" --> litellm
-
-    auth --> guardrails
-    guardrails --> format
-    format --> cache
-
-    litellm --> postgres
-    litellm --> redis
-    guardrails -.-> analyzer
-    guardrails -.-> anonymizer
-
-    cache -- "OpenAI format\nBearer PAT" --> models
-    models --> billing
-
-    claudex -. "stdio" .-> ghserver
-    ghserver -. "GitHub API" .-> github
-```
-
-### Request Flow
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant L as LiteLLM Proxy
-    participant P as Presidio
-    participant G as GitHub Models API
-
-    C->>L: POST /v1/messages (Anthropic format)
-    activate L
-    L->>L: Authenticate virtual key
-    L->>L: Check budget + rate limits
-    L->>P: Scan prompt for PII
-    P-->>L: Masked prompt
-    L->>L: Translate Anthropic → OpenAI format
-    L->>G: POST /chat/completions (OpenAI format)
-    G-->>L: OpenAI response
-    L->>P: Scan response for PII
-    P-->>L: Masked response
-    L->>L: Translate OpenAI → Anthropic format
-    L-->>C: Anthropic Messages response
-    deactivate L
-```
-
-## Available Models
-
-All models are billed through GitHub Enterprise. Current catalog (Feb 2026):
-
-| Alias | Provider | GitHub Model ID |
-|-------|----------|-----------------|
-| `gpt-4.1` | OpenAI | `openai/gpt-4.1` |
-| `gpt-4.1-mini` | OpenAI | `openai/gpt-4.1-mini` |
-| `gpt-4.1-nano` | OpenAI | `openai/gpt-4.1-nano` |
-| `gpt-4o` | OpenAI | `openai/gpt-4o` |
-| `o3-mini` | OpenAI | `openai/o3-mini` |
-| `o4-mini` | OpenAI | `openai/o4-mini` |
-| `llama-4-scout` | Meta | `meta/llama-4-scout-17b-16e-instruct` |
-| `llama-4-maverick` | Meta | `meta/llama-4-maverick-17b-128e-instruct-fp8` |
-| `llama-3.3-70b` | Meta | `meta/llama-3.3-70b-instruct` |
-| `deepseek-r1` | DeepSeek | `deepseek/deepseek-r1` |
-| `mistral-medium` | Mistral | `mistral-ai/mistral-medium-2505` |
-| `codestral` | Mistral | `mistral-ai/codestral-2501` |
-| `grok-3` | xAI | `xai/grok-3` |
-| `grok-3-mini` | xAI | `xai/grok-3-mini` |
-
-> **Note:** Claude/Anthropic models are **not** available on GitHub Models as of 2026-02-15. The config contains a commented-out section to enable them when they appear.
+- **Interactive REPL** with streaming responses
+- **16 models** — Claude Opus/Sonnet/Haiku, GPT-5/4o, Gemini 2.5 Pro, Codex
+- **7 built-in tools** — bash, read/write/edit files, grep, directory listing, web fetch
+- **@model prefix** — `@opus explain this` switches model for one message
+- **Natural language model switching** — "verwende opus und ..." or "use sonnet and ..."
+- **Markdown rendering** — toggle with `/markdown`
+- **Multi-line input** — Alt+Enter for newlines
+- **Token tracking** — TTFT, total time, token count per message
+- **Thinking spinner** — animated indicator while waiting for response
+- **Session history** — persistent across sessions
 
 ## Quick Start
 
 ### Prerequisites
 
-- Docker + Docker Compose (for the gateway)
-- Python 3.10+ (for the CLI)
-- GitHub Copilot Business subscription (for Claude model access)
-- GitHub PAT with `models:read` scope for gateway ([create one](https://github.com/settings/tokens?type=beta))
+- **Python 3.10+**
+- **GitHub Copilot Business** subscription (Individual works too)
+- **Git** (to clone)
 
-### 1. Install the CLI
+### Install
+
+**One-liner (empfohlen):**
 
 ```bash
+git clone https://github.com/demirelh/claudex.git && cd claudex && ./install.sh
+```
+
+Das Skript:
+1. Prüft Python 3.10+
+2. Installiert via **pipx** (bevorzugt, isolierte Umgebung) oder `pip --user` (Fallback)
+3. Macht `claudex` global in jedem Terminal verfügbar
+
+**Oder manuell:**
+
+```bash
+# Option A: pipx (empfohlen — isoliert, global verfügbar)
+pipx install git+https://github.com/demirelh/claudex.git
+
+# Option B: pip --user (global ohne venv)
+pip install --user git+https://github.com/demirelh/claudex.git
+
+# Option C: Dev-Install (zum Mitentwickeln)
 git clone https://github.com/demirelh/claudex.git
 cd claudex
 pip install -e .
 ```
 
-### 2. Use the CLI (Claude Code-like experience)
+> **Hinweis:** Bei `pip --user` muss `~/.local/bin` im PATH sein:
+> ```bash
+> echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+> ```
+
+**Update:**
 
 ```bash
-# Start interactive session (default: Claude Sonnet 4)
+cd claudex && git pull && ./install.sh
+# oder: pipx upgrade claudex
+```
+
+### Run
+
+```bash
 claudex
-
-# Use a specific model
-claudex --model opus
-claudex -m gpt-4o
-
-# List available models
-claudex --list-models
 ```
 
-On first run, ClaudeX will authenticate via GitHub device flow — just open the URL and enter the code. Your token is cached in `~/.config/claudex/`.
+On first run, ClaudeX authenticates via **GitHub Device Flow**:
 
-**Slash commands inside the REPL:**
+1. A URL and code are displayed
+2. Open the URL in your browser
+3. Enter the code and authorize
+4. Token is cached in `~/.config/claudex/` — you won't need to do this again
+
 ```
-/model opus       Switch to Claude Opus 4
-/model gpt-4o     Switch to GPT-4o  
-/models           List all available models
-/system <msg>     Set system prompt
-/clear            Clear conversation
-/help             Show all commands
-/quit             Exit
+╭──────────────────────────────────────────╮
+│  ClaudeX  v0.1.0                         │
+│  GitHub Copilot Business · Claude Sonnet 4│
+│  cwd: /home/user/project                 │
+╰──────────────────────────────────────────╯
+  ✓ Authenticated — Claude Sonnet 4
+
+project › hello!
+  ⠋ Thinking (Claude Sonnet 4)...
+  Hi! How can I help you today?
+  TTFT 0.8s · 1.2s total · 42 tokens
 ```
 
-### 3. Setup the Gateway (optional, for teams)
+### CLI Options
 
 ```bash
-make setup
+claudex                    # Default model (Claude Sonnet 4)
+claudex --model opus       # Start with Claude Opus 4.6
+claudex -m gpt-5           # Start with GPT-5
+claudex --list-models      # Show all available models
+claudex --version          # Show version
 ```
 
-This will:
-- Create `.env` from template (you fill in your GitHub PAT)
-- Start all services (LiteLLM, PostgreSQL, Redis, Presidio)
-- Run a smoke test
+## Usage
 
-### 2. Verify
+### Slash Commands
 
-```bash
-make status
-# or
-make test-quick
+| Command | Description |
+|---------|-------------|
+| `/model <name>` | Switch model permanently (e.g. `/model opus`) |
+| `/models` | List all available models |
+| `/system <msg>` | Set system prompt |
+| `/clear` | Clear conversation history |
+| `/compact` | Compress history (keep last 4 messages) |
+| `/config` | Show current config + token stats |
+| `/tools` | List available tools |
+| `/tools on\|off` | Enable/disable tool use |
+| `/markdown` | Toggle Markdown rendering |
+| `/save` | Save current config to disk |
+| `/logout` | Clear cached GitHub token |
+| `/help` | Show all commands |
+| `/quit` | Exit |
+
+### Model Switching
+
+**Permanent switch** — all following messages use this model:
+```
+project › /model opus
+  ✓ Switched to Claude Opus 4.6
 ```
 
-### 3. Use
-
-```bash
-# Set in your shell profile
-export ANTHROPIC_BASE_URL=http://localhost:4000
-export ANTHROPIC_AUTH_TOKEN=<your-litellm-master-key>
-
-# ClaudeX works through the gateway
-claude
-
-# Or use curl directly (OpenAI format)
-curl -X POST http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-4.1-mini",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "max_tokens": 100
-  }'
-
-# Anthropic Messages format also works
-curl -X POST http://localhost:4000/v1/messages \
-  -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
-  -H "Content-Type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
-  -d '{
-    "model": "gpt-4.1-mini",
-    "max_tokens": 100,
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
+**One-off with @prefix** — only this message uses the model:
+```
+project › @opus explain quantum computing
+  [Using Claude Opus 4.6 for this message]
+  ...
+project › next message    ← back to default model
 ```
 
-## Team Key Management
-
-Create per-team API keys with budget limits and model restrictions:
-
-```bash
-# Auto-create keys for predefined teams
-make keys
-
-# Or manually
-curl -X POST http://localhost:4000/key/generate \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "team_id": "team-backend",
-    "max_budget": 100.0,
-    "budget_duration": "30d",
-    "models": ["gpt-4.1", "gpt-4.1-mini", "deepseek-r1"]
-  }'
+**Natural language** — ClaudeX detects model names in phrases like:
+```
+project › verwende opus und überprüfe die Datei
+project › use gpt-5 and write a test
+project › nutze gemini und erkläre mir das
+project › mit haiku, schreib einen Einzeiler
 ```
 
-Each team key enforces:
-- **Budget cap** (monthly spend limit)
-- **Model allowlist** (only specified models accessible)
-- **Rate limits** (configurable per key)
+### Built-in Tools
+
+ClaudeX can execute actions on your machine via function calling:
+
+| Tool | Description |
+|------|-------------|
+| `bash` | Run shell commands |
+| `read_file` | Read file contents |
+| `write_file` | Create/overwrite files |
+| `edit_file` | Search & replace in files |
+| `list_directory` | List directory contents |
+| `grep_search` | Regex search across files |
+| `web_fetch` | Fetch URLs |
+
+Tools are **enabled by default**. Toggle with `/tools on` or `/tools off`.
+
+## Available Models
+
+All models accessed via your GitHub Copilot Business subscription — no extra API keys:
+
+| Alias | Model | Provider |
+|-------|-------|----------|
+| `opus` | Claude Opus 4.6 | Anthropic |
+| `opus-4.5` | Claude Opus 4.5 | Anthropic |
+| `sonnet` | Claude Sonnet 4 | Anthropic |
+| `sonnet-4.5` | Claude Sonnet 4.5 | Anthropic |
+| `haiku` | Claude Haiku 4.5 | Anthropic |
+| `gemini` | Gemini 2.5 Pro | Google |
+| `gpt-5` | GPT-5 | OpenAI |
+| `gpt-5-mini` | GPT-5 Mini | OpenAI |
+| `gpt-4o` | GPT-4o | OpenAI |
+| `gpt-4o-mini` | GPT-4o Mini | OpenAI |
+| `gpt-4.1` | GPT-4.1 | OpenAI |
+| `codex` | GPT-5.3 Codex | OpenAI |
+
+Run `claudex --list-models` for the full list with descriptions.
+
+## Configuration
+
+Settings are stored in `~/.config/claudex/config.json`:
+
+```json
+{
+  "default_model": "sonnet",
+  "temperature": 0.7,
+  "max_tokens": 8096,
+  "system_prompt": null
+}
+```
+
+Edit via slash commands (`/model`, `/system`) and persist with `/save`.
 
 ## Project Structure
 
 ```
 claudex/
-├── claudex/                         # Python CLI package
-│   ├── __init__.py                  # Package version
-│   ├── __main__.py                  # python -m claudex entry point
-│   ├── auth.py                      # GitHub OAuth + Copilot token exchange
-│   ├── client.py                    # Copilot API client (streaming SSE)
-│   ├── models.py                    # Model definitions + aliases
-│   ├── config.py                    # User config (~/.config/claudex/)
-│   └── cli.py                       # Interactive REPL + slash commands
-├── pyproject.toml                   # Python package config (pip install -e .)
-├── config/
-│   ├── litellm-config.yaml      # Model routing, guardrails, cache config
-│   └── managed-mcp.json         # Org-wide MCP policy template
-├── docker-compose.yaml          # Local dev: LiteLLM + Postgres + Redis + Presidio
-├── .env.example                 # Environment variable template
-├── .mcp.json                    # GitHub MCP Server config for projects
-├── Makefile                     # All common operations
-├── scripts/
-│   ├── setup.sh                 # First-time setup
-│   ├── create-team-keys.sh      # Generate team API keys
-│   └── test-gateway.sh          # Quick validation without pytest
-├── tests/                       # pytest test suite
-│   ├── test_health.py           # Health probes
-│   ├── test_auth.py             # Auth + virtual keys
-│   ├── test_anthropic_format.py # Anthropic Messages API translation
-│   ├── test_openai_format.py    # OpenAI Chat Completions passthrough
-│   ├── test_streaming.py        # SSE streaming (both formats)
-│   ├── test_tool_use.py         # Function calling / tool use
-│   ├── test_pii_redaction.py    # Presidio PII masking
-│   └── test_rate_limiting.py    # Budget limits + model restrictions
-├── k8s/
-│   ├── base/                    # Kustomize base (namespace, deployments, network policies, HPA)
-│   └── overlays/production/     # Production overlay (higher replicas, resources)
-└── docs/
-    └── PLAN.md                  # Full architecture plan & implementation brief
+├── claudex/                   # Python CLI package
+│   ├── __init__.py            # Package version
+│   ├── __main__.py            # python -m claudex
+│   ├── auth.py                # GitHub OAuth device flow + Copilot token
+│   ├── client.py              # Copilot API streaming client
+│   ├── cli.py                 # Interactive REPL
+│   ├── config.py              # User config persistence
+│   ├── models.py              # Model definitions + aliases
+│   └── tools.py               # Tool definitions + execution
+├── pyproject.toml             # Package config (pip install -e .)
+├── config/                    # Gateway config (optional)
+├── docker-compose.yaml        # Gateway services (optional)
+├── k8s/                       # Kubernetes deployment (optional)
+├── scripts/                   # Helper scripts
+└── tests/                     # Test suite
 ```
 
-## Makefile Commands
+## How It Works
 
-```
-make setup            # First-time setup (env, start, smoke test)
-make up               # Start all services
-make down             # Stop all services
-make restart          # Restart all services
-make status           # Show service status + health check
-make logs             # Tail all service logs
-make logs-litellm     # Tail LiteLLM logs only
-make keys             # Create team virtual keys
-make test             # Run full pytest suite
-make test-quick       # Quick curl-based validation
-make test-integration # Integration tests only
-make test-guardrails  # PII/guardrail tests only
-make k8s-deploy-base  # Deploy to Kubernetes (base)
-make k8s-deploy-prod  # Deploy to Kubernetes (production)
-make clean            # Remove containers + volumes
-```
+1. **Auth**: OAuth Device Flow → GitHub token cached locally → exchanged for Copilot session token (auto-refreshes every ~30 min)
+2. **API**: Sends OpenAI-compatible chat completions to `api.githubcopilot.com` with headers mimicking VS Code Copilot Chat
+3. **Streaming**: SSE streaming with tool call delta parsing
+4. **Tools**: Function calling in OpenAI format — model requests tool calls, ClaudeX executes locally, results sent back
 
-## Kubernetes Deployment
+## Gateway (Optional, for Teams)
+
+The repo also includes an optional **LiteLLM gateway** for team use with centralized billing, PII masking, rate limiting, and audit logging. See [docker-compose.yaml](docker-compose.yaml) and [docs/PLAN.md](docs/PLAN.md) for details.
 
 ```bash
-# Validate manifests
-make k8s-dry-run
-
-# Deploy base config (2 replicas)
-make k8s-deploy-base
-
-# Deploy production overlay (3+ replicas, higher resources)
-make k8s-deploy-prod
+make setup   # Set up gateway
+make up      # Start services
+make keys    # Create team API keys
 ```
-
-The K8s setup includes:
-- **Pod Security Standards**: `restricted` profile
-- **NetworkPolicies**: Egress only to `models.github.ai:443`
-- **HPA**: auto-scale 2-8 (base) or 3-16 (prod) replicas on CPU/memory
-- **PDB**: minimum 1 pod always available
-- **Ingress**: internal-only with IP whitelist and SSE streaming support
-
-## Security
-
-- **PII Masking**: Presidio scans all prompts/responses for credit cards, emails, IBANs, phone numbers, SSNs, and GitHub PATs before they reach the LLM
-- **Auth**: Every request requires a valid API key (master or virtual team key)
-- **Budget Controls**: Per-team spending limits with configurable durations
-- **Model Restrictions**: Team keys can be locked to specific models
-- **Network Isolation**: K8s NetworkPolicies restrict egress to GitHub APIs only
-- **No secrets in logs**: API keys are never logged; Presidio masks sensitive data in log output
-
-See [docs/PLAN.md](docs/PLAN.md) for the full security checklist (OWASP, SSRF, prompt injection mitigations).
-
-## Configuration
-
-### Adding Models
-
-Edit `config/litellm-config.yaml` and add a new entry. Model names come from `gh models list`:
-
-```yaml
-- model_name: "my-alias"          # Name your users will use
-  litellm_params:
-    model: "openai/<provider>/<model-id>"  # From GitHub Models catalog
-    api_key: "os.environ/GITHUB_MODELS_PAT"
-    api_base: "https://models.github.ai/inference"
-```
-
-Restart with `make restart` after config changes.
-
-### Environment Variables
-
-See [.env.example](.env.example) for all available variables. Required:
-
-| Variable | Description |
-|----------|-------------|
-| `GITHUB_MODELS_PAT` | GitHub PAT with `models:read` scope |
-| `LITELLM_MASTER_KEY` | Admin key for proxy management |
-| `POSTGRES_PASSWORD` | PostgreSQL password |
-| `DATABASE_URL` | Full PostgreSQL connection string |
 
 ## License
 
-Internal use only.
+MIT
