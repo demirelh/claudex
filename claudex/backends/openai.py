@@ -46,6 +46,17 @@ def _is_retryable(exc: Exception) -> bool:
     return isinstance(exc, _RETRYABLE_ERRORS)
 
 
+def _uses_max_completion_tokens(model: str) -> bool:
+    """Check if a model requires max_completion_tokens instead of max_tokens.
+
+    GPT-5 and newer models use max_completion_tokens.
+    Older models (GPT-4o, GPT-4.1, etc.) use max_tokens.
+    """
+    model_lower = model.lower()
+    # GPT-5 series models use max_completion_tokens
+    return model_lower.startswith("gpt-5")
+
+
 async def _handle_error_response(response) -> None:
     """Handle HTTP error responses from the API."""
     if response.status_code == 401:
@@ -130,11 +141,16 @@ class OpenAIBackend:
         body = {
             "model": model,
             "messages": messages,
-            "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
             "stream": True,
         }
+
+        # Use the correct parameter based on model
+        if _uses_max_completion_tokens(model):
+            body["max_completion_tokens"] = max_tokens
+        else:
+            body["max_tokens"] = max_tokens
 
         if tools:
             body["tools"] = tools

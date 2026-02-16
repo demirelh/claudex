@@ -259,3 +259,29 @@ def test_config_exec_model_no_backend():
     config = Config()
     exec_model = config.get_exec_model(None)
     assert exec_model == "sonnet"
+
+
+def test_openai_gpt5_uses_max_completion_tokens():
+    """GPT-5 models should use max_completion_tokens parameter."""
+    from claudex.backends.openai import _uses_max_completion_tokens
+
+    # GPT-5 series should use max_completion_tokens
+    assert _uses_max_completion_tokens("gpt-5")
+    assert _uses_max_completion_tokens("gpt-5-mini")
+    assert _uses_max_completion_tokens("gpt-5.1")
+    assert _uses_max_completion_tokens("gpt-5.2")
+    assert _uses_max_completion_tokens("gpt-5.1-codex")
+    assert _uses_max_completion_tokens("GPT-5")  # case insensitive
+
+
+def test_openai_gpt4_uses_max_tokens():
+    """GPT-4 and older models should use max_tokens parameter."""
+    from claudex.backends.openai import _uses_max_completion_tokens
+
+    # GPT-4 and older should use max_tokens
+    assert not _uses_max_completion_tokens("gpt-4o")
+    assert not _uses_max_completion_tokens("gpt-4o-mini")
+    assert not _uses_max_completion_tokens("gpt-4.1")
+    assert not _uses_max_completion_tokens("gpt-4")
+    assert not _uses_max_completion_tokens("gpt-3.5-turbo")
+    assert not _uses_max_completion_tokens("GPT-4O")  # case insensitive
