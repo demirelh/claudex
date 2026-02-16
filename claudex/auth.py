@@ -274,9 +274,10 @@ def get_copilot_token(github_token: str, debug: bool = False) -> CopilotToken:
                 f"  3. You authenticated with the wrong GitHub account\n"
                 f"\n"
                 f"  To fix:\n"
-                f"  • Check: https://github.com/settings/copilot\n"
-                f"  • Re-login with correct account: claudex --logout && claudex\n"
-                f"  • Or set: GITHUB_TOKEN=<your-copilot-enabled-token> claudex"
+                f"  • Check your Copilot status: https://github.com/settings/copilot\n"
+                f"  • Re-login with your Copilot-enabled account:\n"
+                f"      claudex --logout && claudex\n"
+                f"  • Use --debug for more info: claudex --debug"
             )
 
         resp.raise_for_status()
@@ -289,9 +290,21 @@ def get_copilot_token(github_token: str, debug: bool = False) -> CopilotToken:
 
 
 def clear_cached_token():
-    """Remove cached GitHub token."""
+    """Remove cached GitHub token and show which sources remain."""
+    removed = False
     if GITHUB_TOKEN_FILE.exists():
         GITHUB_TOKEN_FILE.unlink()
+        removed = True
+
+    # Warn about other token sources that will still be used
+    remaining = []
+    if os.environ.get("GITHUB_TOKEN"):
+        remaining.append("GITHUB_TOKEN environment variable")
+    gh_hosts = Path.home() / ".config" / "gh" / "hosts.yml"
+    if gh_hosts.exists():
+        remaining.append(f"gh CLI config ({gh_hosts})")
+
+    return removed, remaining
 
 
 def ensure_auth(console=None, debug: bool = False) -> tuple[str, CopilotToken]:

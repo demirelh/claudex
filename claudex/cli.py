@@ -267,8 +267,21 @@ class ClaudeXCLI:
             console.print("  Settings saved to ~/.config/claudex/config.json")
 
         elif command == "/logout":
-            clear_cached_token()
-            console.print("  Cached token cleared. Run again to re-authenticate.")
+            removed, remaining = clear_cached_token()
+            if removed:
+                console.print("  [success]✓[/success] Cached token cleared.")
+            else:
+                console.print("  [dim]No cached token found.[/dim]")
+            if remaining:
+                console.print()
+                console.print("  [warning]⚠ Still logged in via:[/warning]")
+                for src in remaining:
+                    console.print(f"    • {src}")
+                console.print()
+                console.print("  [dim]ClaudeX will use these on next start.[/dim]")
+                console.print("  [dim]To fully log out, remove those too.[/dim]")
+            else:
+                console.print("  Next run will start device flow login.")
 
         else:
             console.print(
@@ -691,8 +704,18 @@ def main():
         return
 
     if args.logout:
-        clear_cached_token()
-        console.print("  Cached token cleared.")
+        removed, remaining = clear_cached_token()
+        if removed:
+            console.print("  [success]✓[/success] Cached token cleared.")
+        else:
+            console.print("  [dim]No cached token found.[/dim]")
+        if remaining:
+            console.print()
+            console.print("  [warning]⚠ Still logged in via:[/warning]")
+            for src in remaining:
+                console.print(f"    • {src}")
+            console.print()
+            console.print("  [dim]ClaudeX will use these on next start.[/dim]")
         return
 
     cli = ClaudeXCLI(model=args.model, debug=args.debug)
