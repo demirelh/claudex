@@ -306,13 +306,21 @@ Settings are stored in `~/.config/claudex/config.json`:
   "exec_model": "sonnet",
   "plan_model_openai": "gpt-5",
   "exec_model_openai": "gpt-5-mini",
-  "plan_dir": "~/.config/claudex/plans"
+  "plan_dir": "~/.config/claudex/plans",
+  "max_tool_iterations": 25,
+  "max_tool_iterations_openai": 50
 }
 ```
 
 **Backend-specific plan/exec models**:
 - `plan_model` / `exec_model`: Used with Copilot backend (default: opus/sonnet)
 - `plan_model_openai` / `exec_model_openai`: Used with OpenAI backend (default: gpt-5/gpt-5-mini)
+
+**Tool iteration limits**:
+- `max_tool_iterations`: Maximum tool call iterations for Copilot backend (default: 25)
+- `max_tool_iterations_openai`: Maximum tool call iterations for OpenAI backend (default: 50)
+
+Different models have different tool-calling behaviors. Claude models (Opus/Sonnet) tend to be more efficient with fewer iterations, while GPT models may make more granular tool calls. The higher limit for OpenAI backend allows GPT-5 to complete complex tasks without hitting the iteration limit.
 
 **Note**: GPT-5 models use OpenAI's latest API parameters (`max_completion_tokens` instead of `max_tokens`) and only support the default temperature value (1.0). The temperature parameter is automatically omitted for GPT-5 models.
 

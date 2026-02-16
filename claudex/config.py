@@ -27,6 +27,9 @@ class Config:
     plan_model_openai: str = "gpt-5"
     exec_model_openai: str = "gpt-5-mini"
     plan_dir: str = "~/.config/claudex/plans"
+    # Tool iteration limits per backend
+    max_tool_iterations: int = 25
+    max_tool_iterations_openai: int = 50
 
     def get_plan_model(self, backend_type=None) -> str:
         """Get plan model based on backend type.
@@ -59,6 +62,22 @@ class Config:
         if backend_type == BackendType.OPENAI:
             return self.exec_model_openai
         return self.exec_model
+
+    def get_max_tool_iterations(self, backend_type=None) -> int:
+        """Get max tool iterations based on backend type.
+
+        Args:
+            backend_type: BackendType enum value (or None for default)
+
+        Returns:
+            Max tool iterations limit for the backend.
+        """
+        # Import here to avoid circular dependency
+        from .backends import BackendType
+
+        if backend_type == BackendType.OPENAI:
+            return self.max_tool_iterations_openai
+        return self.max_tool_iterations
 
     def save(self):
         """Persist config to disk."""

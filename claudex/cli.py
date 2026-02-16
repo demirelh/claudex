@@ -125,6 +125,7 @@ HELP_TEXT = """
 """
 
 # Max tool call iterations per message to prevent infinite loops
+# This is now configurable per backend in Config, but kept here as fallback
 MAX_TOOL_ITERATIONS = 25
 
 # ---------------------------------------------------------------------------
@@ -565,7 +566,10 @@ class ClaudeXCLI:
         msg_completion_tokens = 0
         msg_start = time.monotonic()
 
-        for iteration in range(MAX_TOOL_ITERATIONS):
+        # Get backend-specific max iterations
+        max_iterations = self.config.get_max_tool_iterations(self.backend.backend_type if self.backend else None)
+
+        for iteration in range(max_iterations):
             chunks_collected: list[str] = []
             first_chunk_received = False
             live = Live(
@@ -846,8 +850,11 @@ class ClaudeXCLI:
         msg_completion_tokens = 0
         msg_start = time.monotonic()
 
+        # Get backend-specific max iterations
+        max_iterations = self.config.get_max_tool_iterations(self.backend.backend_type if self.backend else None)
+
         # Tool call loop — the model may call tools multiple times
-        for iteration in range(MAX_TOOL_ITERATIONS):
+        for iteration in range(max_iterations):
 
             # --- Show thinking spinner while waiting for first token ---
             spinner_text = Text.assemble(
