@@ -67,7 +67,36 @@ if command -v pipx &>/dev/null; then
 elif "$PYTHON" -m pipx --version &>/dev/null 2>&1; then
     INSTALL_METHOD="pipx-module"
 else
-    INSTALL_METHOD="pip-user"
+    # Check if pip --user works (PEP 668 blocks this on newer distros)
+    if "$PYTHON" -m pip install --user --dry-run --quiet setuptools &>/dev/null 2>&1; then
+        INSTALL_METHOD="pip-user"
+    else
+        # Externally-managed-environment — try to install pipx first
+        dim "System Python is externally managed (PEP 668)."
+        dim "Attempting to install pipx..."
+
+        if command -v apt &>/dev/null; then
+            sudo apt install -y pipx 2>/dev/null && pipx ensurepath 2>/dev/null
+            if command -v pipx &>/dev/null; then
+                INSTALL_METHOD="pipx"
+            fi
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y pipx 2>/dev/null && pipx ensurepath 2>/dev/null
+            if command -v pipx &>/dev/null; then
+                INSTALL_METHOD="pipx"
+            fi
+        elif command -v pacman &>/dev/null; then
+            sudo pacman -S --noconfirm python-pipx 2>/dev/null && pipx ensurepath 2>/dev/null
+            if command -v pipx &>/dev/null; then
+                INSTALL_METHOD="pipx"
+            fi
+        fi
+
+        # If pipx install failed, fall back to standalone venv
+        if [[ -z "$INSTALL_METHOD" ]]; then
+            INSTALL_METHOD="venv"
+        fi
+    fi
 fi
 
 info ""
@@ -129,6 +158,61 @@ case "$INSTALL_METHOD" in
             echo ""
             echo "  Then run:  source ~/.bashrc"
             echo ""
+        fi
+        ;;
+
+    venv)
+        # Externally-managed Python — create a dedicated venv
+        VENV_DIR="$HOME/.claudex/venv"
+        BIN_LINK="$HOME/.local/bin/claudex"
+
+        # Get source
+        if [[ -z "$SOURCE_DIR" ]]; then
+            if [[ -d "$INSTALL_DIR" ]]; then
+                git -C "$INSTALL_DIR" pull --quiet 2>/dev/null || true
+            else
+                git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+            fi
+            SOURCE_DIR="$INSTALL_DIR"
+        fi
+
+        dim "Creating venv at $VENV_DIR"
+        "$PYTHON" -m venv --clear "$VENV_DIR"
+        "$VENV_DIR/bin/pip" install --upgrade --quiet pip
+        "$VENV_DIR/bin/pip" install --quiet "$SOURCE_DIR"
+
+        # Symlink into ~/.local/bin so it's globally available
+        mkdir -p "$(dirname "$BIN_LINK")"
+        ln -sf "$VENV_DIR/bin/claudex" "$BIN_LINK"
+        ok "Created symlink: $BIN_LINK → $VENV_DIR/bin/claudex"
+
+        # Ensure ~/.local/bin is in PATH
+        USER_BIN="$HOME/.local/bin"
+        if [[ ":$PATH:" != *":$USER_BIN:"* ]]; then
+            # Try to add it automatically
+            SHELL_RC=""
+            if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$SHELL" == */zsh ]]; then
+                SHELL_RC="$HOME/.zshrc"
+            elif [[ -f "$HOME/.bashrc" ]]; then
+                SHELL_RC="$HOME/.bashrc"
+            fi
+
+            if [[ -n "$SHELL_RC" ]]; then
+                echo '' >> "$SHELL_RC"
+                echo '# ClaudeX' >> "$SHELL_RC"
+                echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
+                ok "Added ~/.local/bin to PATH in $SHELL_RC"
+                echo ""
+                echo "  Run:  source $SHELL_RC"
+                echo ""
+                export PATH="$USER_BIN:$PATH"
+            else
+                echo ""
+                err "'$USER_BIN' is not in your PATH."
+                echo "  Add this to your shell config:"
+                echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+                echo ""
+            fi
         fi
         ;;
 esac
