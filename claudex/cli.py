@@ -124,7 +124,7 @@ PT_STYLE = PTStyle.from_dict(
 class ClaudeXCLI:
     """Interactive CLI session."""
 
-    def __init__(self, model: Optional[str] = None):
+    def __init__(self, model: Optional[str] = None, debug: bool = False):
         self.config = Config.load()
         self.messages: list[dict] = []
         self.current_model = model or self.config.default_model
@@ -133,6 +133,7 @@ class ClaudeXCLI:
         self.copilot_token: Optional[CopilotToken] = None
         self.tools_enabled: bool = True
         self.markdown_mode: bool = True
+        self.debug: bool = debug
         # Session stats
         self.total_prompt_tokens: int = 0
         self.total_completion_tokens: int = 0
@@ -143,7 +144,7 @@ class ClaudeXCLI:
         if self.copilot_token and not self.copilot_token.is_expired:
             return
         assert self.github_token is not None
-        self.copilot_token = get_copilot_token(self.github_token)
+        self.copilot_token = get_copilot_token(self.github_token, debug=self.debug)
 
     def _build_messages(self) -> list[dict]:
         """Build the full message list including system prompt."""
@@ -556,7 +557,7 @@ class ClaudeXCLI:
 
         # --- Authenticate ---
         try:
-            self.github_token, self.copilot_token = ensure_auth(console)
+            self.github_token, self.copilot_token = ensure_auth(console, debug=self.debug)
         except SystemExit as e:
             console.print(f"  [error]{e}[/error]")
             return
@@ -677,6 +678,11 @@ def main():
         action="store_true",
         help="Clear cached GitHub token and exit",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show diagnostic info (account, token, API responses)",
+    )
 
     args = parser.parse_args()
 
@@ -689,7 +695,7 @@ def main():
         console.print("  Cached token cleared.")
         return
 
-    cli = ClaudeXCLI(model=args.model)
+    cli = ClaudeXCLI(model=args.model, debug=args.debug)
     try:
         cli.run()
     except KeyboardInterrupt:

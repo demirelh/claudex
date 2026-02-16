@@ -183,11 +183,30 @@ def device_flow_login(console=None) -> str:
                 raise SystemExit(f"  Auth error: {error} — {desc}")
 
 
-def get_copilot_token(github_token: str) -> CopilotToken:
+def get_github_user(github_token: str) -> Optional[dict]:
+    """Fetch the authenticated GitHub user info."""
+    try:
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"token {github_token}",
+                    "Accept": "application/json",
+                },
+            )
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def get_copilot_token(github_token: str, debug: bool = False) -> CopilotToken:
     """Exchange a GitHub token for a short-lived Copilot session token.
 
     Args:
         github_token: GitHub OAuth or PAT token.
+        debug: If True, print extra diagnostic info.
 
     Returns:
         CopilotToken with session token and expiry.
@@ -195,6 +214,20 @@ def get_copilot_token(github_token: str) -> CopilotToken:
     Raises:
         SystemExit: If token exchange fails (wrong permissions, no Copilot access).
     """
+    # Optionally fetch user info for diagnostics
+    user_info = None
+    if debug:
+        user_info = get_github_user(github_token)
+        if user_info:
+            login = user_info.get('login', '?')
+            name = user_info.get('name', '')
+            plan = user_info.get('plan', {}).get('name', '?')
+            print(f"  [debug] GitHub user: {login} ({name})")
+            print(f"  [debug] Plan: {plan}")
+            print(f"  [debug] Token: {github_token[:8]}...{github_token[-4:]}")
+        else:
+            print(f"  [debug] Could not fetch user info")
+
     with httpx.Client(timeout=30) as client:
         resp = client.get(
             COPILOT_TOKEN_URL,
@@ -206,6 +239,9 @@ def get_copilot_token(github_token: str) -> CopilotToken:
                 "User-Agent": "ClaudeX-CLI/0.1.0",
             },
         )
+
+        if debug:
+            print(f"  [debug] Copilot token endpoint: {resp.status_code}")
 
         if resp.status_code == 401:
             # Token is invalid — clear cached token
@@ -223,9 +259,24 @@ def get_copilot_token(github_token: str) -> CopilotToken:
             )
 
         if resp.status_code == 404:
+            # Try to give a helpful error with account info
+            if not user_info:
+                user_info = get_github_user(github_token)
+            login = user_info.get('login', 'unknown') if user_info else 'unknown'
             raise SystemExit(
-                "  Copilot token endpoint not found (404).\n"
-                "  Your account may not have Copilot access enabled."
+                f"  Copilot access not available (404).\n"
+                f"\n"
+                f"  Logged in as: {login}\n"
+                f"\n"
+                f"  Possible causes:\n"
+                f"  1. This account has no Copilot Business/Enterprise subscription\n"
+                f"  2. Your org admin hasn't assigned a Copilot seat to this account\n"
+                f"  3. You authenticated with the wrong GitHub account\n"
+                f"\n"
+                f"  To fix:\n"
+                f"  • Check: https://github.com/settings/copilot\n"
+                f"  • Re-login with correct account: claudex --logout && claudex\n"
+                f"  • Or set: GITHUB_TOKEN=<your-copilot-enabled-token> claudex"
             )
 
         resp.raise_for_status()
@@ -243,7 +294,7 @@ def clear_cached_token():
         GITHUB_TOKEN_FILE.unlink()
 
 
-def ensure_auth(console=None) -> tuple[str, CopilotToken]:
+def ensure_auth(console=None, debug: bool = False) -> tuple[str, CopilotToken]:
     """Full authentication flow.
 
     1. Try to get an existing GitHub token
@@ -252,6 +303,7 @@ def ensure_auth(console=None) -> tuple[str, CopilotToken]:
 
     Args:
         console: Optional Rich console for styled output.
+        debug: If True, print diagnostic info.
 
     Returns:
         Tuple of (github_token, copilot_token).
@@ -262,7 +314,7 @@ def ensure_auth(console=None) -> tuple[str, CopilotToken]:
         github_token = device_flow_login(console)
 
     try:
-        copilot_token = get_copilot_token(github_token)
+        copilot_token = get_copilot_token(github_token, debug=debug)
     except SystemExit:
         raise
     except Exception as e:
@@ -272,6 +324,6 @@ def ensure_auth(console=None) -> tuple[str, CopilotToken]:
         _print("  Trying interactive login...")
         clear_cached_token()
         github_token = device_flow_login(console)
-        copilot_token = get_copilot_token(github_token)
+        copilot_token = get_copilot_token(github_token, debug=debug)
 
     return github_token, copilot_token
