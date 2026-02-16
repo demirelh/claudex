@@ -207,3 +207,36 @@ def get_canonical_key(name: str) -> str:
             return key
 
     return name
+
+
+def get_models_by_provider(provider: str) -> dict[str, Model]:
+    """Get all models for a specific provider.
+
+    Args:
+        provider: Provider name (e.g., "OpenAI", "Anthropic", "Google").
+
+    Returns:
+        Dict of model key -> Model for the given provider.
+    """
+    return {
+        key: model
+        for key, model in MODELS.items()
+        if model.provider == provider
+    }
+
+
+def is_model_compatible(model_key: str, provider: str) -> bool:
+    """Check if a model is compatible with a backend provider.
+
+    Args:
+        model_key: Model key or alias.
+        provider: Provider name (e.g., "OpenAI", "Anthropic").
+
+    Returns:
+        True if the model is from the given provider.
+    """
+    model = resolve_model(model_key)
+    if not model:
+        # Unknown model, can't determine compatibility
+        return False
+    return model.provider == provider
