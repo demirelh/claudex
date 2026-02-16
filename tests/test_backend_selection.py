@@ -285,3 +285,104 @@ def test_openai_gpt4_uses_max_tokens():
     assert not _uses_max_completion_tokens("gpt-4")
     assert not _uses_max_completion_tokens("gpt-3.5-turbo")
     assert not _uses_max_completion_tokens("GPT-4O")  # case insensitive
+
+
+@pytest.mark.asyncio
+async def test_openai_gpt5_omits_temperature():
+    """GPT-5 models should omit temperature parameter (uses default 1.0)."""
+    from unittest.mock import AsyncMock, patch, MagicMock
+
+    backend = OpenAIBackend(api_key="test-key")
+
+    # Mock the httpx client to intercept the request body
+    captured_body = None
+
+    class MockResponse:
+        def __init__(self):
+            self.status_code = 200
+
+        async def aiter_lines(self):
+            yield "data: [DONE]"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    class MockClient:
+        def stream(self, method, url, **kwargs):
+            nonlocal captured_body
+            captured_body = kwargs.get("json")
+            return MockResponse()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    with patch('httpx.AsyncClient', return_value=MockClient()):
+        messages = [{"role": "user", "content": "test"}]
+        await backend.stream_chat_with_tools(
+            messages=messages,
+            model="gpt-5",
+            max_tokens=1000,
+            temperature=0.0,  # This should be omitted for GPT-5
+        )
+
+        # Verify temperature was NOT included for GPT-5
+        assert captured_body is not None
+        assert "temperature" not in captured_body
+        assert "max_completion_tokens" in captured_body
+
+
+@pytest.mark.asyncio
+async def test_openai_gpt4_includes_temperature():
+    """GPT-4 models should include temperature parameter."""
+    from unittest.mock import AsyncMock, patch, MagicMock
+
+    backend = OpenAIBackend(api_key="test-key")
+
+    # Mock the httpx client to intercept the request body
+    captured_body = None
+
+    class MockResponse:
+        def __init__(self):
+            self.status_code = 200
+
+        async def aiter_lines(self):
+            yield "data: [DONE]"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    class MockClient:
+        def stream(self, method, url, **kwargs):
+            nonlocal captured_body
+            captured_body = kwargs.get("json")
+            return MockResponse()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    with patch('httpx.AsyncClient', return_value=MockClient()):
+        messages = [{"role": "user", "content": "test"}]
+        await backend.stream_chat_with_tools(
+            messages=messages,
+            model="gpt-4o",
+            max_tokens=1000,
+            temperature=0.5,
+        )
+
+        # Verify temperature WAS included for GPT-4
+        assert captured_body is not None
+        assert "temperature" in captured_body
+        assert captured_body["temperature"] == 0.5
+        assert "max_tokens" in captured_body

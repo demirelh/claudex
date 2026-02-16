@@ -141,10 +141,14 @@ class OpenAIBackend:
         body = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
             "top_p": top_p,
             "stream": True,
         }
+
+        # GPT-5 models only support default temperature (1.0)
+        # Older models support custom temperature values
+        if not _uses_max_completion_tokens(model):
+            body["temperature"] = temperature
 
         # Use the correct parameter based on model
         if _uses_max_completion_tokens(model):

@@ -314,6 +314,8 @@ Settings are stored in `~/.config/claudex/config.json`:
 - `plan_model` / `exec_model`: Used with Copilot backend (default: opus/sonnet)
 - `plan_model_openai` / `exec_model_openai`: Used with OpenAI backend (default: gpt-5/gpt-5-mini)
 
+**Note**: GPT-5 models use OpenAI's latest API parameters (`max_completion_tokens` instead of `max_tokens`) and only support the default temperature value (1.0). The temperature parameter is automatically omitted for GPT-5 models.
+
 Edit via slash commands (`/model`, `/system`) and persist with `/save`.
 
 ## Project Structure
