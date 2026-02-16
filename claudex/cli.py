@@ -249,7 +249,7 @@ class ClaudeXCLI:
             # Block model switching in plan/exec modes
             if self.plan_state.mode != PermissionMode.NORMAL:
                 mode_name = self.plan_state.mode.value
-                locked = self.config.plan_model if self.plan_state.mode == PermissionMode.PLAN else self.config.exec_model
+                locked = self.config.get_plan_model(self.backend.backend_type if self.backend else None) if self.plan_state.mode == PermissionMode.PLAN else self.config.get_exec_model(self.backend.backend_type if self.backend else None)
                 locked_obj = resolve_model(locked)
                 locked_name = locked_obj.name if locked_obj else locked
                 console.print(
@@ -452,9 +452,10 @@ class ClaudeXCLI:
                 return True
 
             plan_path = self.plan_state.enter_plan()
-            plan_model_obj = resolve_model(self.config.plan_model)
+            plan_model = self.config.get_plan_model(self.backend.backend_type if self.backend else None)
+            plan_model_obj = resolve_model(plan_model)
             plan_model_name = (
-                plan_model_obj.name if plan_model_obj else self.config.plan_model
+                plan_model_obj.name if plan_model_obj else plan_model
             )
             console.print(
                 f"  ⏸ [warning]plan mode on[/warning] "
@@ -497,9 +498,10 @@ class ClaudeXCLI:
             console.print(f"  [error]{e}[/error]")
             return True
 
-        exec_model_obj = resolve_model(self.config.exec_model)
+        exec_model = self.config.get_exec_model(self.backend.backend_type if self.backend else None)
+        exec_model_obj = resolve_model(exec_model)
         exec_model_name = (
-            exec_model_obj.name if exec_model_obj else self.config.exec_model
+            exec_model_obj.name if exec_model_obj else exec_model
         )
         console.print(
             f"  ⏵ [success]executing approved plan[/success] "
@@ -553,7 +555,7 @@ class ClaudeXCLI:
             console.print(f"\n  [error]{e}[/error]")
             return
 
-        use_model = self.config.exec_model
+        use_model = self.config.get_exec_model(self.backend.backend_type if self.backend else None)
         model_id = get_model_id(use_model)
         model_obj = resolve_model(use_model)
         model_display = model_obj.name if model_obj else use_model
@@ -803,15 +805,15 @@ class ClaudeXCLI:
 
         # Mode-based model override (enforced, takes priority)
         if self.plan_state.mode == PermissionMode.PLAN:
-            use_model = self.config.plan_model
+            use_model = self.config.get_plan_model(self.backend.backend_type if self.backend else None)
             if override_model:
-                plan_obj = resolve_model(self.config.plan_model)
-                console.print(f"  [dim]Model locked to {plan_obj.name if plan_obj else self.config.plan_model} in plan mode[/dim]")
+                plan_obj = resolve_model(use_model)
+                console.print(f"  [dim]Model locked to {plan_obj.name if plan_obj else use_model} in plan mode[/dim]")
         elif self.plan_state.mode == PermissionMode.EXEC:
-            use_model = self.config.exec_model
+            use_model = self.config.get_exec_model(self.backend.backend_type if self.backend else None)
             if override_model:
-                exec_obj = resolve_model(self.config.exec_model)
-                console.print(f"  [dim]Model locked to {exec_obj.name if exec_obj else self.config.exec_model} in exec mode[/dim]")
+                exec_obj = resolve_model(use_model)
+                console.print(f"  [dim]Model locked to {exec_obj.name if exec_obj else use_model} in exec mode[/dim]")
 
         self.messages.append({"role": "user", "content": actual_input})
 

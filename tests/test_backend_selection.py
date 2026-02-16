@@ -207,3 +207,55 @@ def test_get_default_model_for_provider_unknown():
     from claudex.models import DEFAULT_MODEL
     default = get_default_model_for_provider("UnknownProvider")
     assert default == DEFAULT_MODEL
+
+
+def test_config_plan_model_copilot():
+    """Config returns Copilot plan model by default."""
+    from claudex.config import Config
+    config = Config()
+    plan_model = config.get_plan_model(BackendType.COPILOT)
+    assert plan_model == "opus"
+
+
+def test_config_plan_model_openai():
+    """Config returns OpenAI plan model for OpenAI backend."""
+    from claudex.config import Config
+    config = Config()
+    plan_model = config.get_plan_model(BackendType.OPENAI)
+    assert plan_model == "gpt-5"
+    # Verify it's a valid OpenAI model
+    assert is_model_compatible(plan_model, "OpenAI")
+
+
+def test_config_exec_model_copilot():
+    """Config returns Copilot exec model by default."""
+    from claudex.config import Config
+    config = Config()
+    exec_model = config.get_exec_model(BackendType.COPILOT)
+    assert exec_model == "sonnet"
+
+
+def test_config_exec_model_openai():
+    """Config returns OpenAI exec model for OpenAI backend."""
+    from claudex.config import Config
+    config = Config()
+    exec_model = config.get_exec_model(BackendType.OPENAI)
+    assert exec_model == "gpt-5-mini"
+    # Verify it's a valid OpenAI model
+    assert is_model_compatible(exec_model, "OpenAI")
+
+
+def test_config_plan_model_no_backend():
+    """Config returns default plan model when backend is None."""
+    from claudex.config import Config
+    config = Config()
+    plan_model = config.get_plan_model(None)
+    assert plan_model == "opus"
+
+
+def test_config_exec_model_no_backend():
+    """Config returns default exec model when backend is None."""
+    from claudex.config import Config
+    config = Config()
+    exec_model = config.get_exec_model(None)
+    assert exec_model == "sonnet"

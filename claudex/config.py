@@ -20,10 +20,45 @@ class Config:
     temperature: float = 0.0
     max_tokens: int = 16384
     system_prompt: Optional[str] = None
-    # Plan mode settings
+    # Plan mode settings - default (Copilot backend)
     plan_model: str = "opus"
     exec_model: str = "sonnet"
+    # Plan mode settings - OpenAI backend
+    plan_model_openai: str = "gpt-5"
+    exec_model_openai: str = "gpt-5-mini"
     plan_dir: str = "~/.config/claudex/plans"
+
+    def get_plan_model(self, backend_type=None) -> str:
+        """Get plan model based on backend type.
+
+        Args:
+            backend_type: BackendType enum value (or None for default)
+
+        Returns:
+            Model key for planning mode.
+        """
+        # Import here to avoid circular dependency
+        from .backends import BackendType
+
+        if backend_type == BackendType.OPENAI:
+            return self.plan_model_openai
+        return self.plan_model
+
+    def get_exec_model(self, backend_type=None) -> str:
+        """Get exec model based on backend type.
+
+        Args:
+            backend_type: BackendType enum value (or None for default)
+
+        Returns:
+            Model key for execution mode.
+        """
+        # Import here to avoid circular dependency
+        from .backends import BackendType
+
+        if backend_type == BackendType.OPENAI:
+            return self.exec_model_openai
+        return self.exec_model
 
     def save(self):
         """Persist config to disk."""
