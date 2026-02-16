@@ -645,6 +645,48 @@ class ClaudeXCLI:
 
         return None, user_input
 
+    def _detect_plan_intent(self, user_input: str) -> tuple[bool, str]:
+        """Detect plan mode intent in natural language input.
+
+        Matches patterns like:
+            'in plan mode ...'           -> (True, '...')
+            'first plan then implement'  -> (True, 'first plan then implement ...')
+            'erst planen dann ...'       -> (True, '...')
+            'plan with opus ...'         -> (True, '...')
+            'plan mode: ...'             -> (True, '...')
+            'im plan modus ...'          -> (True, '...')
+
+        Returns:
+            (is_plan, task_text) — task_text is the full input if plan is detected.
+        """
+        if self.plan_state.mode != PermissionMode.NORMAL:
+            return False, user_input
+
+        lower = user_input.lower()
+
+        # Direct patterns: starts with plan-related phrases
+        plan_patterns = [
+            # English
+            r"(?:^|\. )(?:first |start )?(?:in )?plan ?mode",
+            r"(?:^|\. )plan (?:with|using|in) (?:opus|claude)",
+            r"(?:^|\. )first plan[, ] ?then (?:implement|execute|do|build|code)",
+            r"(?:^|\. )(?:use |start )plan mode",
+            # German
+            r"(?:^|\. )(?:erst(?:mal)? )?(?:im )?plan ?modus",
+            r"(?:^|\. )erst(?:mal)? planen[, ] ?dann",
+            r"(?:^|\. )(?:zuerst |erst(?:mal)? )?plan(?:en|ung)? (?:mit|in|und dann)",
+        ]
+
+        for pattern in plan_patterns:
+            if re.search(pattern, lower):
+                return True, user_input
+
+        # Check for "plan mode" or "plan modus" anywhere in the text
+        if re.search(r"\bplan[- ]?mod(?:e|us)\b", lower):
+            return True, user_input
+
+        return False, user_input
+
     def _render_response(self, text: str):
         """Render response text — Markdown or plain."""
         if self.markdown_mode and text.strip():
@@ -993,6 +1035,12 @@ class ClaudeXCLI:
                 except EOFError:
                     console.print("  [dim]Goodbye![/dim]")
                     break
+                continue
+
+            # Detect plan mode intent in natural language
+            is_plan, task_text = self._detect_plan_intent(user_input)
+            if is_plan:
+                self._handle_plan_command(task_text)
                 continue
 
             # Send message and stream response

@@ -16,7 +16,7 @@ No API keys to manage. No extra billing. Just your existing GitHub Copilot Busin
 - **Token tracking** — TTFT, total time, token count per message
 - **Thinking spinner** — animated indicator while waiting for response
 - **Session history** — persistent across sessions
-- **Plan Mode** — Opus plans, Sonnet executes, with approval gate
+- **Plan Mode** — Opus plans, Sonnet executes, with approval gate (also via natural language)
 
 ## Quick Start
 
@@ -173,6 +173,20 @@ Tools are **enabled by default**. Toggle with `/tools on` or `/tools off`.
 Plan Mode splits complex tasks into a planning phase (Opus) and an execution phase (Sonnet), with a mandatory approval gate in between.
 
 **Workflow**: `NORMAL → /plan → PLAN → /approve → EXEC → done → NORMAL`
+
+You can also trigger plan mode via **natural language** — no `/plan` command needed:
+```
+project › in plan mode, refactor the auth module
+  ⏸ plan mode on (Claude Opus 4.6)
+
+project › first plan then implement the changes
+  ⏸ plan mode on (Claude Opus 4.6)
+
+project › erst planen dann implementieren
+  ⏸ plan mode on (Claude Opus 4.6)
+```
+
+Or use the explicit command:
 
 ```
 project › /plan refactor the auth module
