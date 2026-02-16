@@ -17,7 +17,7 @@ Choose your backend: GitHub Copilot Business (no extra billing) or OpenAI API (d
 - **Token tracking** — TTFT, total time, token count per message
 - **Thinking spinner** — animated indicator while waiting for response
 - **Session history** — persistent across sessions
-- **Plan Mode** — Opus plans, Sonnet executes, with approval gate (also via natural language)
+- **Plan Mode** — Backend-aware: Opus/Sonnet for Copilot, GPT-5/5-Mini for OpenAI, with approval gate
 
 ## Quick Start
 
@@ -215,7 +215,15 @@ Tools are **enabled by default**. Toggle with `/tools on` or `/tools off`.
 
 ### Plan Mode
 
-Plan Mode splits complex tasks into a planning phase (Opus) and an execution phase (Sonnet), with a mandatory approval gate in between.
+Plan Mode splits complex tasks into a planning phase and an execution phase, with a mandatory approval gate in between.
+
+**Default models (Copilot backend)**:
+- Planning: Claude Opus 4.6
+- Execution: Claude Sonnet 4
+
+**OpenAI backend**:
+- Planning: GPT-5
+- Execution: GPT-5 Mini
 
 **Workflow**: `NORMAL → /plan → PLAN → /approve → EXEC → done → NORMAL`
 
@@ -296,9 +304,15 @@ Settings are stored in `~/.config/claudex/config.json`:
   "system_prompt": null,
   "plan_model": "opus",
   "exec_model": "sonnet",
+  "plan_model_openai": "gpt-5",
+  "exec_model_openai": "gpt-5-mini",
   "plan_dir": "~/.config/claudex/plans"
 }
 ```
+
+**Backend-specific plan/exec models**:
+- `plan_model` / `exec_model`: Used with Copilot backend (default: opus/sonnet)
+- `plan_model_openai` / `exec_model_openai`: Used with OpenAI backend (default: gpt-5/gpt-5-mini)
 
 Edit via slash commands (`/model`, `/system`) and persist with `/save`.
 
