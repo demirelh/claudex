@@ -118,14 +118,49 @@ All models are billed through GitHub Enterprise. Current catalog (Feb 2026):
 
 ### Prerequisites
 
-- Docker + Docker Compose
-- GitHub PAT with `models:read` scope ([create one](https://github.com/settings/tokens?type=beta))
+- Docker + Docker Compose (for the gateway)
+- Python 3.10+ (for the CLI)
+- GitHub Copilot Business subscription (for Claude model access)
+- GitHub PAT with `models:read` scope for gateway ([create one](https://github.com/settings/tokens?type=beta))
 
-### 1. Setup
+### 1. Install the CLI
 
 ```bash
 git clone https://github.com/demirelh/claudex.git
 cd claudex
+pip install -e .
+```
+
+### 2. Use the CLI (Claude Code-like experience)
+
+```bash
+# Start interactive session (default: Claude Sonnet 4)
+claudex
+
+# Use a specific model
+claudex --model opus
+claudex -m gpt-4o
+
+# List available models
+claudex --list-models
+```
+
+On first run, ClaudeX will authenticate via GitHub device flow — just open the URL and enter the code. Your token is cached in `~/.config/claudex/`.
+
+**Slash commands inside the REPL:**
+```
+/model opus       Switch to Claude Opus 4
+/model gpt-4o     Switch to GPT-4o  
+/models           List all available models
+/system <msg>     Set system prompt
+/clear            Clear conversation
+/help             Show all commands
+/quit             Exit
+```
+
+### 3. Setup the Gateway (optional, for teams)
+
+```bash
 make setup
 ```
 
@@ -203,6 +238,15 @@ Each team key enforces:
 
 ```
 claudex/
+├── claudex/                         # Python CLI package
+│   ├── __init__.py                  # Package version
+│   ├── __main__.py                  # python -m claudex entry point
+│   ├── auth.py                      # GitHub OAuth + Copilot token exchange
+│   ├── client.py                    # Copilot API client (streaming SSE)
+│   ├── models.py                    # Model definitions + aliases
+│   ├── config.py                    # User config (~/.config/claudex/)
+│   └── cli.py                       # Interactive REPL + slash commands
+├── pyproject.toml                   # Python package config (pip install -e .)
 ├── config/
 │   ├── litellm-config.yaml      # Model routing, guardrails, cache config
 │   └── managed-mcp.json         # Org-wide MCP policy template
