@@ -524,6 +524,22 @@ class ClaudeXCLI:
             msg_prompt_tokens += result.prompt_tokens
             msg_completion_tokens += result.completion_tokens
 
+            # Handle partial (interrupted) result
+            if result.partial:
+                if result.content:
+                    if self.markdown_mode:
+                        console.print()
+                        self._render_response(result.content)
+                    else:
+                        print()
+                    self.messages.append({"role": "assistant", "content": result.content})
+                console.print(
+                    "  [warning]⚠ Response interrupted (connection lost). "
+                    "Partial content preserved. Send a follow-up to continue.[/warning]"
+                )
+                console.print()
+                return
+
             if not result.has_tool_calls:
                 if result.content:
                     if self.markdown_mode:
@@ -811,6 +827,24 @@ class ClaudeXCLI:
             # Track tokens
             msg_prompt_tokens += result.prompt_tokens
             msg_completion_tokens += result.completion_tokens
+
+            # Handle partial (interrupted) result
+            if result.partial:
+                if result.content:
+                    if self.markdown_mode:
+                        console.print()
+                        self._render_response(result.content)
+                    else:
+                        print()
+                    self.messages.append(
+                        {"role": "assistant", "content": result.content}
+                    )
+                console.print(
+                    "  [warning]⚠ Response interrupted (connection lost). "
+                    "Partial content preserved. Send a follow-up to continue.[/warning]"
+                )
+                console.print()
+                return
 
             # --- Text response (no tool calls) → done ---
             if not result.has_tool_calls:

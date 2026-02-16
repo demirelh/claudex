@@ -66,6 +66,8 @@ class StreamResult:
     # Timing
     time_to_first_token: float = 0.0
     total_time: float = 0.0
+    # Whether the stream was interrupted but partial content was recovered
+    partial: bool = False
 
     @property
     def has_tool_calls(self) -> bool:
@@ -106,10 +108,12 @@ async def _handle_error_response(response) -> None:
 # Transient network errors that are safe to retry
 _RETRYABLE_ERRORS = (
     httpx.RemoteProtocolError,  # "peer closed connection without sending complete message body"
+    httpx.LocalProtocolError,   # local protocol violation
     httpx.ReadError,            # read operation failed
     httpx.ConnectError,         # connection refused / reset
     httpx.CloseError,           # error closing connection
-    httpx.ReadTimeout,          # read timed out (not connect timeout)
+    httpx.StreamError,          # stream-level error
+    httpx.TimeoutException,     # any timeout (read, connect, pool)
 )
 
 
@@ -188,6 +192,7 @@ async def stream_chat_with_tools(
             sys.stderr.write(msg)
 
     last_error: Optional[Exception] = None
+    stream_completed = False
 
     for attempt in range(MAX_STREAM_RETRIES + 1):
         if attempt > 0:
@@ -287,6 +292,7 @@ async def stream_chat_with_tools(
 
             # Success — break out of retry loop
             last_error = None
+            stream_completed = True
             break
 
         except Exception as exc:
@@ -294,7 +300,11 @@ async def stream_chat_with_tools(
                 last_error = exc
                 _on_retry(attempt + 1, exc, result.content)
                 continue
-            # Non-retryable or exhausted retries — re-raise
+            # Non-retryable or exhausted retries
+            # If we have partial content, return it instead of raising
+            if result.content:
+                result.partial = True
+                break
             raise
 
     # Collect accumulated tool calls
