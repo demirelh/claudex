@@ -4,7 +4,9 @@ Implements local tool execution that the LLM can invoke:
   - bash: Run shell commands
   - read_file: Read file contents
   - write_file: Write/create files
+  - edit_file: Search-and-replace edit in a file
   - list_directory: List directory contents
+  - grep_search: Search file contents with regex
   - web_fetch: Fetch URL content
 
 Tools use the OpenAI function calling format.
@@ -12,6 +14,7 @@ Tools use the OpenAI function calling format.
 
 import json
 import os
+import re
 import subprocess
 import traceback
 from pathlib import Path
@@ -147,6 +150,66 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "grep_search",
+            "description": (
+                "Search for a pattern in files recursively. Uses regex by default. "
+                "Returns matching lines with file paths and line numbers. "
+                "Useful for finding code, functions, variables, or text across a project."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "The regex pattern to search for",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Directory or file to search in (default: current directory)",
+                        "default": ".",
+                    },
+                    "include": {
+                        "type": "string",
+                        "description": "File glob pattern to include (e.g. '*.py', '*.ts')",
+                    },
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": (
+                "Edit a file by replacing an exact string with a new string. "
+                "The old_string must match EXACTLY (including whitespace and indentation). "
+                "Use read_file first to see the exact content, then provide old_string "
+                "with enough context to uniquely identify the location."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the file to edit",
+                    },
+                    "old_string": {
+                        "type": "string",
+                        "description": "The exact string to find and replace (must match exactly)",
+                    },
+                    "new_string": {
+                        "type": "string",
+                        "description": "The replacement string",
+                    },
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+        },
+    },
 ]
 
 
@@ -172,8 +235,12 @@ def execute_tool(name: str, arguments: dict[str, Any], console=None) -> str:
             return _run_read_file(arguments, console)
         elif name == "write_file":
             return _run_write_file(arguments, console)
+        elif name == "edit_file":
+            return _run_edit_file(arguments, console)
         elif name == "list_directory":
             return _run_list_directory(arguments, console)
+        elif name == "grep_search":
+            return _run_grep_search(arguments, console)
         elif name == "web_fetch":
             return _run_web_fetch(arguments, console)
         else:
@@ -342,3 +409,110 @@ def _run_web_fetch(args: dict, console=None) -> str:
         return f"Error: Could not connect to {url}: {e}"
     except Exception as e:
         return f"Error fetching URL: {e}"
+
+
+def _run_grep_search(args: dict, console=None) -> str:
+    """Search for pattern in files."""
+    pattern = args.get("pattern", "")
+    path = args.get("path", ".")
+    include = args.get("include", "")
+
+    if not pattern:
+        return "Error: No pattern provided"
+
+    search_path = Path(path).expanduser()
+    if not search_path.is_absolute():
+        search_path = Path.cwd() / search_path
+
+    if console:
+        console.print(f"  [dim]🔍 Searching for '{pattern}' in {search_path}[/dim]")
+
+    # Build grep command
+    cmd = ["grep", "-rn", "--color=never", "-I"]  # recursive, line numbers, no binary
+    if include:
+        cmd.extend(["--include", include])
+    cmd.extend([pattern, str(search_path)])
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        output = result.stdout.strip()
+        if not output:
+            return f"No matches found for pattern '{pattern}'"
+
+        # Truncate if too many results
+        lines = output.split("\n")
+        if len(lines) > 100:
+            output = "\n".join(lines[:100])
+            output += f"\n\n... ({len(lines) - 100} more matches truncated)"
+
+        return output
+
+    except subprocess.TimeoutExpired:
+        return "Error: Search timed out after 30 seconds"
+    except Exception as e:
+        return f"Error searching: {e}"
+
+
+def _run_edit_file(args: dict, console=None) -> str:
+    """Edit a file by search-and-replace."""
+    path = args.get("path", "")
+    old_string = args.get("old_string", "")
+    new_string = args.get("new_string", "")
+
+    if not path:
+        return "Error: No path provided"
+    if not old_string:
+        return "Error: No old_string provided"
+
+    filepath = Path(path).expanduser()
+    if not filepath.is_absolute():
+        filepath = Path.cwd() / filepath
+
+    if not filepath.exists():
+        return f"Error: File not found: {filepath}"
+    if not filepath.is_file():
+        return f"Error: Not a file: {filepath}"
+
+    try:
+        content = filepath.read_text()
+
+        # Count occurrences
+        count = content.count(old_string)
+        if count == 0:
+            # Try to give helpful feedback
+            # Show first few chars to help debug
+            preview = old_string[:80].replace('\n', '\\n')
+            return (
+                f"Error: old_string not found in {filepath}\n"
+                f"Searched for: {preview}\n"
+                f"Make sure the string matches exactly (including whitespace)."
+            )
+        if count > 1:
+            return (
+                f"Error: old_string found {count} times in {filepath}. "
+                f"Include more surrounding context to make the match unique."
+            )
+
+        if console:
+            console.print(f"  [dim]✏️  Editing {filepath}[/dim]")
+
+        new_content = content.replace(old_string, new_string, 1)
+        filepath.write_text(new_content)
+
+        # Calculate diff stats
+        old_lines = old_string.count('\n') + 1
+        new_lines = new_string.count('\n') + 1
+
+        return (
+            f"Successfully edited {filepath}\n"
+            f"Replaced {old_lines} lines with {new_lines} lines"
+        )
+
+    except Exception as e:
+        return f"Error editing file: {e}"

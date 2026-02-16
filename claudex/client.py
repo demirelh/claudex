@@ -53,6 +53,13 @@ class StreamResult:
     content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: Optional[str] = None
+    # Token usage tracking
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    # Timing
+    time_to_first_token: float = 0.0
+    total_time: float = 0.0
 
     @property
     def has_tool_calls(self) -> bool:
@@ -138,6 +145,10 @@ async def stream_chat_with_tools(
     result = StreamResult()
     # Accumulate tool calls by index
     tool_calls_by_index: dict[int, ToolCall] = {}
+    first_token_received = False
+
+    import time
+    start_time = time.monotonic()
 
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(180.0, connect=15.0)
@@ -157,6 +168,14 @@ async def stream_chat_with_tools(
 
                 try:
                     chunk = json.loads(data)
+
+                    # Track usage if present
+                    usage = chunk.get("usage")
+                    if usage:
+                        result.prompt_tokens = usage.get("prompt_tokens", 0)
+                        result.completion_tokens = usage.get("completion_tokens", 0)
+                        result.total_tokens = usage.get("total_tokens", 0)
+
                     choices = chunk.get("choices", [])
                     if not choices:
                         continue
@@ -171,6 +190,9 @@ async def stream_chat_with_tools(
                     # --- Text content ---
                     content = delta.get("content")
                     if content:
+                        if not first_token_received:
+                            first_token_received = True
+                            result.time_to_first_token = time.monotonic() - start_time
                         result.content += content
                         if on_content_chunk:
                             on_content_chunk(content)
@@ -178,6 +200,10 @@ async def stream_chat_with_tools(
                     # --- Tool calls ---
                     tc_deltas = delta.get("tool_calls", [])
                     for tc_delta in tc_deltas:
+                        if not first_token_received:
+                            first_token_received = True
+                            result.time_to_first_token = time.monotonic() - start_time
+
                         idx = tc_delta.get("index", 0)
 
                         if idx not in tool_calls_by_index:
@@ -204,6 +230,7 @@ async def stream_chat_with_tools(
             for i in sorted(tool_calls_by_index.keys())
         ]
 
+    result.total_time = time.monotonic() - start_time
     return result
 
 

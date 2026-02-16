@@ -14,16 +14,25 @@ Usage:
 
 import argparse
 import asyncio
+import json
+import os
+import re
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
+from rich.live import Live
+from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.table import Table
+from rich.text import Text
 from rich.theme import Theme
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style as PTStyle
 
 from . import __version__
@@ -67,25 +76,36 @@ HELP_TEXT = """
   [command]/system[/command] <msg>   Set system prompt for this session
   [command]/clear[/command]          Clear conversation history
   [command]/tools[/command]          Toggle tool use on/off
+  [command]/compact[/command]        Toggle compact vs Markdown output
   [command]/config[/command]         Show current configuration
   [command]/save[/command]           Save current settings as defaults
   [command]/logout[/command]         Clear cached GitHub token
   [command]/help[/command]           Show this help
   [command]/quit[/command]           Exit  [dim](or Ctrl+D / Ctrl+C)[/dim]
 
+[bold]Inline model switching:[/bold]
+  [dim]@opus[/dim]   <msg>     Send this message using Claude Opus
+  [dim]@sonnet[/dim] <msg>     Send using Sonnet (switches back after)
+  [dim]@gpt-5[/dim]  <msg>     Send using GPT-5
+
+[bold]Multi-line input:[/bold]
+  Press [cyan]Shift+Enter[/cyan] or [cyan]Alt+Enter[/cyan] to add a new line.
+  Press [cyan]Enter[/cyan] to send.
+
 [bold]Tools (enabled by default):[/bold]
-  • [dim]bash[/dim]           — Run shell commands
-  • [dim]read_file[/dim]      — Read file contents
-  • [dim]write_file[/dim]     — Create/overwrite files
-  • [dim]list_directory[/dim]  — List directory contents
-  • [dim]web_fetch[/dim]      — Fetch URLs (HTTP/HTTPS)
+  • [dim]bash[/dim]             — Run shell commands
+  • [dim]read_file[/dim]        — Read file contents
+  • [dim]write_file[/dim]       — Create/overwrite files
+  • [dim]edit_file[/dim]        — Search-and-replace edit
+  • [dim]list_directory[/dim]    — List directory contents
+  • [dim]grep_search[/dim]      — Search files with regex
+  • [dim]web_fetch[/dim]        — Fetch URLs (HTTP/HTTPS)
 
 [bold]Tips:[/bold]
-  • The model can use tools automatically when needed
+  • The model can use tools automatically (files, shell, web)
   • Use /tools to disable tools for plain chat mode
-  • Conversation history is kept for the session (use /clear to reset)
-  • Copilot tokens auto-refresh when they expire (~30 min)
-  • Set GITHUB_TOKEN env var to skip interactive login
+  • Conversation history is kept for the session (/clear to reset)
+  • Token usage is shown after each response
 """
 
 # Max tool call iterations per message to prevent infinite loops
@@ -112,6 +132,11 @@ class ClaudeXCLI:
         self.github_token: Optional[str] = None
         self.copilot_token: Optional[CopilotToken] = None
         self.tools_enabled: bool = True
+        self.markdown_mode: bool = True
+        # Session stats
+        self.total_prompt_tokens: int = 0
+        self.total_completion_tokens: int = 0
+        self.session_start: float = time.time()
 
     def _refresh_token_if_needed(self):
         """Refresh Copilot session token if expired."""
@@ -214,6 +239,11 @@ class ClaudeXCLI:
             state = "[success]enabled[/success]" if self.tools_enabled else "[warning]disabled[/warning]"
             console.print(f"  Tools: {state}")
 
+        elif command == "/compact":
+            self.markdown_mode = not self.markdown_mode
+            mode = "[success]Markdown[/success]" if self.markdown_mode else "[info]compact (plain)[/info]"
+            console.print(f"  Output: {mode}")
+
         elif command == "/config":
             model = resolve_model(self.current_model)
             model_name = model.name if model else self.current_model
@@ -222,8 +252,12 @@ class ClaudeXCLI:
             console.print(f"  Max tokens:  {self.config.max_tokens}")
             tools_state = "[success]on[/success]" if self.tools_enabled else "[warning]off[/warning]"
             console.print(f"  Tools:       {tools_state}")
+            md_state = "[success]Markdown[/success]" if self.markdown_mode else "[info]plain[/info]"
+            console.print(f"  Output:      {md_state}")
+            console.print(f"  Tokens:      {self.total_prompt_tokens:,} in / {self.total_completion_tokens:,} out")
             sp = self.system_prompt or "[dim](none)[/dim]"
             console.print(f"  System:      {sp[:80]}")
+            console.print(f"  CWD:         [dim]{os.getcwd()}[/dim]")
 
         elif command == "/save":
             self.config.default_model = self.current_model
@@ -243,9 +277,61 @@ class ClaudeXCLI:
 
         return True
 
+    def _parse_model_prefix(self, user_input: str) -> tuple[Optional[str], str]:
+        """Parse model override from input.
+
+        Supports:
+            '@opus plan this'                -> ('opus-4.6', 'plan this')
+            'use opus and plan this'         -> ('opus-4.6', 'plan this')
+            'verwende opus und plan this'    -> ('opus-4.6', 'plan this')
+            'hello'                          -> (None, 'hello')
+        """
+        # --- 1. Explicit @model prefix ---
+        match = re.match(r"^@(\S+)\s+(.+)$", user_input, re.DOTALL)
+        if match:
+            model_name = match.group(1)
+            message = match.group(2)
+            resolved = resolve_model(model_name)
+            if resolved:
+                return get_canonical_key(model_name), message
+
+        # --- 2. Natural-language model switch ---
+        # Patterns: "use <model> ...", "verwende <model> ...", "nutze <model> ...",
+        #           "with <model> ...", "mit <model> ...", "nimm <model> ..."
+        nl_match = re.match(
+            r"^(?:use|verwende|nutze|nimm|mit|with|take)\s+(\S+)"
+            r"(?:\s+(?:und|and|to|um|,)\s+|\s*,\s*)(.+)$",
+            user_input,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if nl_match:
+            model_name = nl_match.group(1)
+            message = nl_match.group(2)
+            resolved = resolve_model(model_name)
+            if resolved:
+                return get_canonical_key(model_name), message
+
+        return None, user_input
+
+    def _render_response(self, text: str):
+        """Render response text — Markdown or plain."""
+        if self.markdown_mode and text.strip():
+            try:
+                md = Markdown(text)
+                console.print(md)
+            except Exception:
+                # Fallback to plain text
+                print(text)
+        else:
+            print(text)
+
     async def _send_message(self, user_input: str):
         """Send a message and stream the response, handling tool calls."""
-        self.messages.append({"role": "user", "content": user_input})
+        # Parse @model prefix for one-off model switching
+        override_model, actual_input = self._parse_model_prefix(user_input)
+        use_model = override_model or self.current_model
+
+        self.messages.append({"role": "user", "content": actual_input})
 
         try:
             self._refresh_token_if_needed()
@@ -258,12 +344,47 @@ class ClaudeXCLI:
             self.messages.pop()
             return
 
-        model_id = get_model_id(self.current_model)
+        model_id = get_model_id(use_model)
+        model_obj = resolve_model(use_model)
+        model_display = model_obj.name if model_obj else use_model
         tools = TOOL_DEFINITIONS if self.tools_enabled else None
+
+        if override_model:
+            console.print(f"  [dim]Using [model]{model_display}[/model] for this message[/dim]")
+
+        # Track total tokens for this message exchange
+        msg_prompt_tokens = 0
+        msg_completion_tokens = 0
+        msg_start = time.monotonic()
 
         # Tool call loop — the model may call tools multiple times
         for iteration in range(MAX_TOOL_ITERATIONS):
-            console.print()
+
+            # --- Show thinking spinner while waiting for first token ---
+            spinner_text = Text.assemble(
+                ("  ", ""),
+                ("⠋ ", "cyan"),
+                (f"Thinking ({model_display})...", "dim"),
+            )
+            chunks_collected: list[str] = []
+            first_chunk_received = False
+            live = Live(
+                Spinner("dots", text=f"  [dim]Thinking ({model_display})...[/dim]"),
+                console=console,
+                refresh_per_second=12,
+                transient=True,
+            )
+            live.start()
+
+            def on_chunk(chunk: str):
+                nonlocal first_chunk_received
+                if not first_chunk_received:
+                    first_chunk_received = True
+                    live.stop()
+                chunks_collected.append(chunk)
+                if not self.markdown_mode:
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
 
             try:
                 result = await stream_chat_with_tools(
@@ -273,41 +394,68 @@ class ClaudeXCLI:
                     max_tokens=self.config.max_tokens,
                     temperature=self.config.temperature,
                     tools=tools,
-                    on_content_chunk=lambda chunk: (
-                        sys.stdout.write(chunk), sys.stdout.flush()
-                    ),
+                    on_content_chunk=on_chunk,
                 )
             except KeyboardInterrupt:
+                live.stop()
                 console.print("\n  [warning]Response cancelled[/warning]")
                 return
             except PermissionError as e:
+                live.stop()
                 console.print(f"\n  [error]{e}[/error]")
                 self.copilot_token = None
                 return
             except CopilotAPIError as e:
+                live.stop()
                 console.print(f"\n  [error]{e}[/error]")
                 return
             except Exception as e:
+                live.stop()
                 console.print(f"\n  [error]Error: {e}[/error]")
                 return
+            finally:
+                if live.is_started:
+                    live.stop()
+
+            # Track tokens
+            msg_prompt_tokens += result.prompt_tokens
+            msg_completion_tokens += result.completion_tokens
 
             # --- Text response (no tool calls) → done ---
             if not result.has_tool_calls:
                 if result.content:
-                    print()  # Newline after streamed text
+                    if self.markdown_mode:
+                        console.print()
+                        self._render_response(result.content)
+                    else:
+                        print()  # Newline after streamed text
                     self.messages.append(
                         {"role": "assistant", "content": result.content}
                     )
+
+                # Show stats
+                self.total_prompt_tokens += msg_prompt_tokens
+                self.total_completion_tokens += msg_completion_tokens
+                elapsed = time.monotonic() - msg_start
+                stats_parts = []
+                if result.time_to_first_token > 0:
+                    stats_parts.append(f"TTFT {result.time_to_first_token:.1f}s")
+                stats_parts.append(f"{elapsed:.1f}s total")
+                if msg_prompt_tokens or msg_completion_tokens:
+                    stats_parts.append(f"{msg_prompt_tokens + msg_completion_tokens:,} tokens")
+                console.print(f"  [dim]{' · '.join(stats_parts)}[/dim]")
                 console.print()
                 return
 
             # --- Tool calls ---
             if result.content:
-                print()
+                if self.markdown_mode:
+                    console.print()
+                    self._render_response(result.content)
+                else:
+                    print()
 
             # Build assistant message with tool_calls
-            import json as _json
-
             assistant_msg: dict = {
                 "role": "assistant",
                 "content": result.content or None,
@@ -328,25 +476,36 @@ class ClaudeXCLI:
             # Execute each tool call
             for tc in result.tool_calls:
                 try:
-                    args = _json.loads(tc.arguments_json) if tc.arguments_json else {}
-                except _json.JSONDecodeError:
+                    args = json.loads(tc.arguments_json) if tc.arguments_json else {}
+                except json.JSONDecodeError:
                     args = {}
 
-                # Display tool invocation
+                # Display tool invocation in a styled way
                 args_preview = ", ".join(
                     f"{k}={repr(v)[:60]}" for k, v in args.items()
                 )
+                console.print()
                 console.print(
-                    f"  [info]⚡ {tc.function_name}[/info]({args_preview})"
+                    f"  [info]⚡ {tc.function_name}[/info]"
+                    f"  [dim]{args_preview}[/dim]"
                 )
 
                 tool_result = execute_tool(tc.function_name, args, console)
 
-                # Show truncated result
-                preview = tool_result[:200].replace("\n", " ")
-                if len(tool_result) > 200:
-                    preview += "..."
-                console.print(f"  [dim]→ {preview}[/dim]")
+                # Show truncated result in panel
+                preview_lines = tool_result.split("\n")
+                if len(preview_lines) > 8:
+                    preview = "\n".join(preview_lines[:8]) + f"\n... ({len(preview_lines) - 8} more lines)"
+                else:
+                    preview = tool_result
+                if len(preview) > 500:
+                    preview = preview[:500] + "..."
+                console.print(Panel(
+                    Text(preview, style="dim"),
+                    border_style="dim",
+                    padding=(0, 1),
+                    expand=False,
+                ))
 
                 self.messages.append(
                     {
@@ -360,6 +519,16 @@ class ClaudeXCLI:
 
         console.print("  [warning]Max tool iterations reached[/warning]")
 
+    def _build_prompt_fragments(self):
+        """Build the prompt showing CWD and model."""
+        cwd = os.path.basename(os.getcwd()) or "/"
+        model_obj = resolve_model(self.current_model)
+        model_short = model_obj.name if model_obj else self.current_model
+        return [
+            ("class:cwd", f"{cwd}"),
+            ("class:prompt", " › "),
+        ]
+
     def run(self):
         """Main sync REPL loop."""
         # --- Banner ---
@@ -370,14 +539,19 @@ class ClaudeXCLI:
         console.print(
             Panel(
                 f"[bold white]ClaudeX[/bold white]  [dim]v{__version__}[/dim]\n"
-                f"[dim]GitHub Copilot Business[/dim] · [model]{model_display}[/model]",
+                f"[dim]GitHub Copilot Business[/dim] · [model]{model_display}[/model]\n"
+                f"[dim]cwd: {os.getcwd()}[/dim]",
                 border_style="bright_blue",
                 padding=(0, 2),
             )
         )
         console.print(
             "  Type [command]/help[/command] for commands, "
-            "[command]/quit[/command] to exit.\n"
+            "[command]/quit[/command] to exit."
+        )
+        console.print(
+            "  [dim]Multi-line: Shift+Enter or Alt+Enter. "
+            "Prefix @model to override.[/dim]\n"
         )
 
         # --- Authenticate ---
@@ -400,17 +574,32 @@ class ClaudeXCLI:
                 f"  [success]✓[/success] Authenticated — [model]{self.current_model}[/model]\n"
             )
 
+        # --- Multi-line key bindings ---
+        kb = KeyBindings()
+
+        @kb.add("escape", "enter")   # Alt+Enter
+        def _(event):
+            event.current_buffer.insert_text("\n")
+
         # --- REPL ---
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+        pt_style = PTStyle.from_dict({
+            "prompt": "#00cc99 bold",
+            "cwd": "#888888",
+        })
+
         session = PromptSession(
             history=FileHistory(str(CONFIG_DIR / "history")),
+            key_bindings=kb,
+            multiline=False,
         )
 
         while True:
             try:
                 user_input = session.prompt(
-                    [("class:prompt", "› ")],
-                    style=PT_STYLE,
+                    self._build_prompt_fragments(),
+                    style=pt_style,
                 )
             except (EOFError, KeyboardInterrupt):
                 console.print("\n  [dim]Goodbye![/dim]")
