@@ -50,6 +50,7 @@ from .models import (
     get_canonical_key,
     is_model_compatible,
     get_models_by_provider,
+    get_default_model_for_provider,
 )
 from .plan_mode import PlanState, PermissionMode
 from .tools import TOOL_DEFINITIONS, execute_tool, get_tools_for_mode
@@ -1095,13 +1096,16 @@ class ClaudeXCLI:
             if not is_model_compatible(self.current_model, "OpenAI"):
                 resolved = resolve_model(self.current_model)
                 model_name = resolved.name if resolved else self.current_model
+                # Auto-switch to a compatible OpenAI model
+                default_openai_model = get_default_model_for_provider("OpenAI")
+                self.current_model = default_openai_model
+                default_model_obj = resolve_model(default_openai_model)
                 console.print()
                 console.print(
-                    f"  [error]Model '{model_name}' is not available with OpenAI backend.[/error]\n"
-                    "  OpenAI backend only supports OpenAI models (gpt-4o, gpt-5, etc.).\n"
-                    "  Use --backend copilot for Claude/Gemini models.\n"
+                    f"  [warning]Model '{model_name}' is not available with OpenAI backend.[/warning]\n"
+                    f"  [info]Automatically switched to {default_model_obj.name}.[/info]\n"
+                    "  [dim]Use --backend copilot for Claude/Gemini models.[/dim]\n"
                 )
-                return
 
         # --- Banner ---
         model = resolve_model(self.current_model)

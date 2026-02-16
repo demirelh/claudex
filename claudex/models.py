@@ -240,3 +240,21 @@ def is_model_compatible(model_key: str, provider: str) -> bool:
         # Unknown model, can't determine compatibility
         return False
     return model.provider == provider
+
+
+def get_default_model_for_provider(provider: str) -> str:
+    """Get a sensible default model for a specific provider.
+
+    Args:
+        provider: Provider name (e.g., "OpenAI", "Anthropic", "Google").
+
+    Returns:
+        Model key for a default model from the provider.
+        Returns DEFAULT_MODEL if provider is not found.
+    """
+    provider_defaults = {
+        "OpenAI": "gpt-4o",
+        "Anthropic": "sonnet",
+        "Google": "gemini",
+    }
+    return provider_defaults.get(provider, DEFAULT_MODEL)

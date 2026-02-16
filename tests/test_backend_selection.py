@@ -5,7 +5,11 @@ import pytest
 from unittest.mock import Mock, patch
 
 from claudex.backends import BackendType, CopilotBackend, OpenAIBackend
-from claudex.models import is_model_compatible, get_models_by_provider
+from claudex.models import (
+    is_model_compatible,
+    get_models_by_provider,
+    get_default_model_for_provider,
+)
 
 
 def test_model_compatibility_openai():
@@ -172,3 +176,34 @@ async def test_openai_backend_stream_integration():
     assert result.content
     assert "test" in result.content.lower()
     assert result.finish_reason in ["stop", "length"]
+
+
+def test_get_default_model_for_provider_openai():
+    """Get default model for OpenAI provider."""
+    default = get_default_model_for_provider("OpenAI")
+    assert default == "gpt-4o"
+    # Verify it's a valid model
+    assert is_model_compatible(default, "OpenAI")
+
+
+def test_get_default_model_for_provider_anthropic():
+    """Get default model for Anthropic provider."""
+    default = get_default_model_for_provider("Anthropic")
+    assert default == "sonnet"
+    # Verify it's a valid model
+    assert is_model_compatible(default, "Anthropic")
+
+
+def test_get_default_model_for_provider_google():
+    """Get default model for Google provider."""
+    default = get_default_model_for_provider("Google")
+    assert default == "gemini"
+    # Verify it's a valid model
+    assert is_model_compatible(default, "Google")
+
+
+def test_get_default_model_for_provider_unknown():
+    """Get default model for unknown provider returns global default."""
+    from claudex.models import DEFAULT_MODEL
+    default = get_default_model_for_provider("UnknownProvider")
+    assert default == DEFAULT_MODEL
