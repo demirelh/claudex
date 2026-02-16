@@ -146,7 +146,7 @@ claudex --backend openai
 - Copilot backend: All models (Claude, GPT, Gemini)
 - OpenAI backend: Only OpenAI models (gpt-4o, gpt-5, etc.)
 
-Attempting to use an incompatible model (e.g., `opus` with OpenAI backend) will show a clear error message.
+When using `--backend openai`, ClaudeX automatically switches to `gpt-4o` if the default or specified model is incompatible. Attempting to manually switch to an incompatible model (e.g., `/model opus`) will show an error message.
 
 ## Usage
 
